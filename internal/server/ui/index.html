@@ -3,270 +3,507 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>exe — personal cloud</title>
+<title>exe</title>
+<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect x="6.5" y="1.5" width="19" height="24" fill="%23DAD5CA" stroke="%23000"/><rect x="10.5" y="5.5" width="11" height="8" fill="%237FD67F" stroke="%23000"/><rect x="12" y="18" width="8" height="2" fill="%2355524B"/><rect x="9.5" y="25.5" width="13" height="3" fill="%23C8C3B8" stroke="%23000"/></svg>'>
 <link rel="stylesheet" href="/ui/vendor/xterm.css">
 <script src="/ui/vendor/xterm.js"></script>
 <script src="/ui/vendor/xterm-addon-fit.js"></script>
 <style>
+/* Mac OS 9 Platinum — pixel values from macthemes.garden's implementation */
 :root {
-  --bg: #f6f7f9; --panel: #ffffff; --text: #1a1d21; --muted: #6b7280;
-  --border: #e2e5ea; --accent: #2563eb; --accent-text: #ffffff;
-  --green: #16a34a; --red: #dc2626; --amber: #d97706; --yellow: #eab308;
-  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1115; --panel: #171a21; --text: #e5e7eb; --muted: #9ca3af;
-    --border: #262b36; --accent: #3b82f6; --yellow: #facc15;
-  }
+  --black: #262626;
+  --g200: #eee; --g300: #ddd; --g400: #ccc; --g500: #bbb; --g600: #999; --g700: #808080; --g800: #666;
+  --hl: #333399; --lav: #ccf;
+  --green: #1f9e33; --red: #cc3333; --amber: #cc8400; --gray: #808080;
+  --mono: "Monaco", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font: "Charcoal", "Chicago", "Geneva", "Lucida Grande", "Lucida Sans", Geneva, Verdana, sans-serif;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text);
-  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-header { display: flex; align-items: center; gap: 16px; padding: 12px 20px;
-  border-bottom: 1px solid var(--border); background: var(--panel);
-  position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
-.brand { font-weight: 700; font-size: 18px; }
-.brand .sub { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 6px; }
-nav { display: flex; gap: 4px; }
-nav button { background: none; border: none; color: var(--muted); padding: 6px 12px;
-  border-radius: 8px; font-size: 14px; cursor: pointer; }
-nav button.active { background: var(--bg); color: var(--text); font-weight: 600; }
-#token { width: 150px; }
-#cf-dot { margin-left: auto; display: flex; align-items: center; gap: 7px;
-  background: none; border: none; cursor: pointer; padding: 6px 8px; border-radius: 8px; }
-#cf-dot:hover { background: var(--bg); }
-.dot { width: 11px; height: 11px; border-radius: 50%; background: var(--muted);
-  display: inline-block; transition: background .3s; }
-main { max-width: 980px; margin: 0 auto; padding: 20px; }
-.card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
-  padding: 16px; margin-bottom: 16px; }
-.card h3 { margin: 0 0 10px; font-size: 14px; text-transform: uppercase;
-  letter-spacing: .04em; color: var(--muted); }
-input, textarea, select { background: var(--bg); color: var(--text);
-  border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px;
-  font-size: 14px; font-family: inherit; }
-input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-textarea { width: 100%; min-height: 70px; resize: vertical; font-family: var(--mono); font-size: 13px; }
-button.btn { background: var(--accent); color: var(--accent-text); border: none;
-  border-radius: 8px; padding: 8px 14px; font-size: 14px; cursor: pointer; font-weight: 500; }
-button.btn:disabled { opacity: .5; cursor: default; }
-button.ghost { background: none; border: 1px solid var(--border); color: var(--text);
-  border-radius: 8px; padding: 5px 10px; font-size: 13px; cursor: pointer; }
-button.ghost.lg { padding: 8px 14px; font-size: 14px; }
-button.ghost.danger { color: var(--red); }
-button.ghost.armed { background: var(--red); border-color: var(--red); color: #fff; }
-table { width: 100%; border-collapse: collapse; }
-th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
-  color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--border); }
-td { padding: 10px; border-bottom: 1px solid var(--border); }
-tr.vm-row { cursor: pointer; }
-tr.vm-row:hover td { background: var(--bg); }
-tr:last-child td { border-bottom: none; }
-.chip { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-.chip.running, .chip.done { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
-.chip.stopped { background: color-mix(in srgb, var(--muted) 15%, transparent); color: var(--muted); }
-.chip.error, .chip.interrupted { background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red); }
-.chip.starting, .chip.stopping { background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); }
-pre.out { background: #0b0d12; color: #d1e3d1; border-radius: 8px; padding: 12px;
-  font-family: var(--mono); font-size: 12.5px; max-height: 420px; overflow: auto;
-  white-space: pre-wrap; word-break: break-word; }
-.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
-.muted { color: var(--muted); font-size: 13px; }
-.mono { font-family: var(--mono); font-size: 13px; }
-.t-item { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
-  margin-bottom: 6px; cursor: pointer; display: flex; gap: 10px; align-items: baseline; }
-.t-item:hover { background: var(--bg); }
-.t-item.sel { border-color: var(--accent); }
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-.svc-item { display: flex; gap: 12px; align-items: baseline; padding: 8px 10px;
-  border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; }
-#term-box { height: 400px; background: #000; border-radius: 8px; padding: 6px 0 6px 6px; }
-#term-box .xterm { height: 100%; }
-.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55);
-  display: flex; align-items: center; justify-content: center; z-index: 50; }
-.modal { background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
-  width: 92%; max-width: 540px; max-height: 85vh; overflow: auto; padding: 20px; }
-.modal select, .modal input[type=text], .modal input[type=password] { width: 100%; }
-.wiz-fb { border-radius: 8px; padding: 8px 12px; font-size: 13.5px; white-space: pre-wrap; }
-.wiz-fb.ok { background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); }
-.wiz-fb.err { background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); }
-.wiz-fb.warn { background: color-mix(in srgb, var(--amber) 12%, transparent); color: var(--amber); }
-.wiz-review div { padding: 5px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 12px; }
-.wiz-review div:last-child { border-bottom: none; }
-.t-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-.field label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 3px; }
-.field input { width: 100%; }
-.field .hint { font-size: 11.5px; color: var(--amber); }
-#status-bar { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
-  background: var(--text); color: var(--bg); border-radius: 8px; padding: 8px 16px;
-  font-size: 13.5px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
-#status-bar.show { opacity: .95; }
-h2 { margin: 4px 0 12px; }
-@media (max-width: 640px) { td:nth-child(3), th:nth-child(3) { display: none; } }
+html, body { height: 100%; }
+body {
+  margin: 0; overflow: hidden; font: 12px/1.45 var(--font); color: var(--black);
+  background: var(--lav) url(data:image/png;base64,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) repeat;
+  user-select: none; cursor: default;
+}
 [hidden] { display: none !important; }
+a { color: #202a87; text-decoration: underline; }
+.muted { color: #555; font-size: 11px; }
+.mono { font-family: var(--mono); font-size: 11px; }
+
+/* ---------- menu bar ---------- */
+#menubar {
+  position: fixed; top: 0; left: 0; right: 0; height: 20px; z-index: 3000;
+  background: var(--g300);
+  border-bottom: 1px solid var(--black);
+  box-shadow: inset 0 1px 0 #fff, inset 1px 0 0 #fff, inset -1px -1px 0 var(--g600);
+  display: flex; align-items: stretch; font-size: 12px;
+}
+.menu { display: flex; align-items: center; padding: 0 10px; font-weight: bold; }
+.menu.appl { padding: 0 12px; }
+.menu.open { background: var(--hl); color: #fff; }
+.mb-right { margin-left: auto; display: flex; align-items: stretch; }
+#cf-dot { display: flex; align-items: center; gap: 5px; padding: 0 10px; border: none;
+  background: none; font: inherit; color: inherit; }
+#cf-dot:active { background: var(--hl); color: #fff; }
+.dot { width: 9px; height: 9px; border-radius: 50%; border: 1px solid rgba(0,0,0,.55);
+  background: radial-gradient(circle at 30% 28%, rgba(255,255,255,.85), rgba(255,255,255,0) 55%), var(--gray);
+  display: inline-block; }
+#clock { display: flex; align-items: center; padding: 0 12px; font-weight: bold;
+  border-left: 1px solid var(--g600); box-shadow: inset 1px 0 0 #fff; }
+.dropdown {
+  position: fixed; top: 20px; z-index: 3001; min-width: 200px;
+  background: var(--g200); border: 1px solid var(--black); padding: 2px 1px;
+  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 var(--g500), 2px 2px 0 rgba(38,38,38,.85);
+}
+.dd-item { padding: 3px 22px 3px 18px; white-space: nowrap; }
+.dd-item:hover { background: var(--hl); color: #fff; }
+.dd-sep { height: 1px; background: var(--g600); margin: 3px 2px; box-shadow: 0 1px 0 #fff; }
+
+/* ---------- desktop icons ---------- */
+#desktop { position: fixed; inset: 20px 0 0 0; }
+#icons { position: absolute; top: 14px; right: 8px; bottom: 110px;
+  display: flex; flex-direction: column; flex-wrap: wrap-reverse; align-content: flex-end;
+  gap: 16px 8px; z-index: 1; }
+.dicon { width: 82px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.dicon svg { filter: drop-shadow(1px 1px 0 rgba(0,0,0,.4)); }
+.dicon .lbl { max-width: 82px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #fff; text-shadow: 1px 1px 1px #000; padding: 0 4px; font-size: 11px; }
+.dicon.sel svg { filter: brightness(.55) saturate(1.3) drop-shadow(1px 1px 0 rgba(0,0,0,.4)); }
+.dicon.sel .lbl { background: var(--hl); text-shadow: none; }
+#trash-icon { position: absolute; bottom: 16px; right: 14px; z-index: 1; }
+
+/* ---------- window chrome (macthemes.garden-accurate) ---------- */
+.window {
+  position: absolute; z-index: 10; min-width: 220px;
+  background: var(--g400); border: 1px solid var(--black);
+  box-shadow: 2px 2px 0 var(--black);
+}
+.window::before { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 4;
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,.5), inset -1px -1px 0 var(--g600), inset 1px 1px 0 #fff; }
+.titlebar { display: flex; align-items: center; gap: 4px; padding: 2px 4px;
+  background: var(--g400); user-select: none; }
+.titlebar .stripe { flex: 1; height: 12px; min-width: 8px; position: relative;
+  background-color: var(--g300);
+  background-image: linear-gradient(#fff, #fff 50%, #777 50%, #777);
+  background-size: 100% 2px; background-repeat: repeat; }
+.titlebar .stripe::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 1px;
+  background-image: linear-gradient(#fff, #fff 50%, #ccc 50%, #ccc);
+  background-size: 100% 2px; background-repeat: repeat; border-bottom: 1px solid #ccc; }
+.titlebar .stripe::after { content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 1px;
+  background-image: linear-gradient(#ccc, #ccc 50%, #777 50%, #777);
+  background-size: 100% 2px; background-repeat: repeat; }
+.titlebar .title { font-weight: bold; font-size: 12px; line-height: 13px; padding: 0 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%;
+  background: var(--g400); }
+.tbox { width: 13px; height: 13px; flex: none; position: relative; border: none; padding: 0;
+  background: linear-gradient(135deg, #9a9a9a 0%, #f1f1f1 100%) 50% / 9px 9px;
+  box-shadow: inset 1px 1px 0 var(--g700), inset -1px -1px 0 #fff,
+    inset 0 0 0 2px var(--black), inset 3px 3px 0 #fff, inset -3px -3px 0 var(--g700); }
+.tbox:active::after { content: ""; position: absolute; inset: 2px; z-index: 1;
+  background-image: linear-gradient(135deg, #353535cc 0%, #9c9c9ccc 100%); }
+.tbox.shade::before { content: ""; position: absolute; top: 5px; left: 1px; right: 1px; height: 3px;
+  z-index: 2; box-shadow: inset 0 0 0 1px var(--black); }
+.tbox.zoom::before { content: ""; position: absolute; top: 1px; left: 1px; width: 7px; height: 7px;
+  z-index: 2; box-shadow: inset 0 0 0 1px var(--black); }
+.window:not(.front) .stripe { visibility: hidden; }
+.window:not(.front) .tbox { visibility: hidden; }
+.window:not(.front) .title { color: #777; }
+.window.shaded { padding-bottom: 1px; }
+.window.shaded .win-frame { display: none; }
+
+/* sunken content frame, inset 4px into the platinum chrome */
+.win-frame { margin: 0 4px 4px; border: 1px solid var(--black); background: var(--g300);
+  position: relative;
+  box-shadow: -1px -1px 0 var(--g600), -1px 0 0 var(--g600), 0 -1px 0 var(--g600),
+    1px 1px 0 #fff, 1px 0 0 #fff, 0 1px 0 #fff; }
+.win-frame.paper { background: #fff; }
+.win-body { padding: 12px; overflow: auto; max-height: calc(100vh - 130px); }
+#win-vms .win-body { padding: 0; }
+.statusbar { border-top: 1px solid var(--black); background: var(--g300);
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,.6), inset -1px -1px 0 #aaa;
+  padding: 3px 8px; font-size: 11px; color: #333; display: flex; align-items: center; gap: 12px; }
+
+/* modal dialogs */
+.overlay { position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,.15);
+  display: flex; align-items: center; justify-content: center; }
+.window.modal { position: relative; z-index: 2001; width: 92%; max-width: 540px; }
+.window.modal .win-body { max-height: 74vh; }
+
+/* ---------- group boxes (cards) ---------- */
+.card { position: relative; border: 1px solid var(--g600); margin: 14px 0 16px; padding: 16px 10px 10px;
+  box-shadow: 1px 1px 0 #fff, inset 1px 1px 0 #fff; }
+.card > h3 { position: absolute; top: -8px; left: 10px; margin: 0; background: var(--g300);
+  padding: 0 6px; font-size: 11px; font-weight: bold; letter-spacing: .02em; }
+
+/* ---------- controls (macthemes.garden pixel bevels) ---------- */
+button { font: inherit; cursor: default; }
+button.btn, button.ghost {
+  background: var(--g300); color: var(--black);
+  border: 1px solid var(--black); border-radius: 3px;
+  padding: 3px 12px; font-size: 11px; font-weight: bold;
+  box-shadow: inset 1px 1px 0 var(--g300), inset -1px -1px 0 #777,
+    inset 2px 2px 0 #fff, inset -2px -2px 0 #aaa;
+}
+button.btn { outline: 2px solid var(--black); outline-offset: 1px; border-radius: 4px; }
+button.btn:active, button.ghost:active {
+  background: #666; color: #fff;
+  box-shadow: inset 1px 1px 0 #444, inset -1px -1px 0 #888,
+    inset 2px 2px 0 #555, inset -2px -2px 0 #777; }
+button.btn:disabled, button.ghost:disabled { color: #9d9d9d; border-color: #9d9d9d;
+  background: var(--g300); box-shadow: none; outline-color: #9d9d9d; }
+button.ghost.danger { color: #7a1010; }
+button.ghost.armed { background: var(--red); color: #fff;
+  box-shadow: inset 1px 1px 0 #e88, inset -1px -1px 0 #911; }
+button.ghost.sm { padding: 1px 8px; font-size: 10px; border-radius: 3px; }
+input, textarea, select {
+  background: #fff; color: var(--black); border: 1px solid var(--black); border-radius: 0;
+  padding: 3px 5px; font: inherit; font-size: 12px;
+  box-shadow: -1px -1px 0 var(--g600), -1px 0 0 var(--g600), 0 -1px 0 var(--g600),
+    1px 1px 0 #fff, 1px 0 0 #fff, 0 1px 0 #fff;
+}
+input:focus, textarea:focus, select:focus { outline: 2px solid #9999fe; outline-offset: 0; }
+textarea { width: 100%; min-height: 64px; resize: vertical; font-family: var(--mono); font-size: 11px; }
+select { padding: 2px 4px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.field label { display: block; font-size: 11px; color: #222; margin-bottom: 3px; }
+.field input { width: 100%; }
+.field .hint { font-size: 10.5px; color: #7a4b00; margin-top: 2px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+
+/* ---------- finder-ish list ---------- */
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { text-align: left; font-size: 11px; font-weight: bold; padding: 3px 9px;
+  background: var(--g300);
+  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #aaa;
+  border-bottom: 1px solid var(--black); }
+td { padding: 4px 9px; border-bottom: 1px solid #efefef; }
+tr:last-child td { border-bottom: none; }
+tr.vm-row:hover td { background: #dfe3f5; }
+
+/* status chips */
+.chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: bold; }
+.chip::before { content: ""; width: 9px; height: 9px; border-radius: 50%; flex: none;
+  border: 1px solid rgba(0,0,0,.5);
+  background: radial-gradient(circle at 30% 28%, rgba(255,255,255,.85), rgba(255,255,255,0) 55%), var(--c, var(--gray)); }
+.chip.running, .chip.done { --c: var(--green); }
+.chip.stopped { --c: var(--gray); color: #444; }
+.chip.error, .chip.interrupted { --c: var(--red); }
+.chip.starting, .chip.stopping { --c: var(--amber); }
+
+/* misc panels */
+pre.out { background: #10120f; color: #cfe3cf; border: 1px solid var(--black); padding: 10px;
+  font-family: var(--mono); font-size: 11px; max-height: 380px; overflow: auto;
+  white-space: pre-wrap; word-break: break-word; user-select: text;
+  box-shadow: -1px -1px 0 var(--g600), 1px 1px 0 #fff; }
+.svc-item { display: flex; gap: 10px; align-items: baseline; padding: 5px 8px;
+  border: 1px solid var(--g600); background: var(--g200); margin-bottom: 5px;
+  box-shadow: inset 1px 1px 0 #fff; }
+.t-item { padding: 5px 8px; border: 1px solid var(--g600); background: var(--g200); margin-bottom: 5px;
+  display: flex; gap: 10px; align-items: baseline; box-shadow: inset 1px 1px 0 #fff; }
+.t-item.sel { background: var(--hl); }
+.t-item.sel, .t-item.sel .muted, .t-item.sel .mono { color: #fff; }
+.t-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+#term-box { height: 380px; background: #000; border: 1px solid var(--black); padding: 5px 0 5px 5px;
+  box-shadow: -1px -1px 0 var(--g600), 1px 1px 0 #fff; }
+#term-box .xterm { height: 100%; }
+td .mono, .svc-item .mono { user-select: text; }
+
+/* wizard feedback */
+.wiz-fb { border: 1px solid; padding: 7px 10px; font-size: 11.5px; white-space: pre-wrap; }
+.wiz-fb.ok { background: #e2f2e0; border-color: #2f7d33; color: #1d5a22; }
+.wiz-fb.err { background: #f6dddd; border-color: #a33; color: #7a1010; }
+.wiz-fb.warn { background: #f7ecd2; border-color: #b07d18; color: #6e4d05; }
+.wiz-review div { padding: 4px 0; border-bottom: 1px solid var(--g500); display: flex;
+  justify-content: space-between; gap: 12px; }
+.wiz-review div:last-child { border-bottom: none; }
+.modal select, .modal input[type=text], .modal input[type=password] { width: 100%; }
+
+/* toast */
+#status-bar { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  background: #ffffc9; color: #000; border: 1px solid var(--black); padding: 5px 14px;
+  font-size: 12px; box-shadow: inset 1px 1px 0 #fff, 2px 2px 0 var(--black);
+  opacity: 0; transition: opacity .15s; pointer-events: none; max-width: 90vw; z-index: 4000; }
+#status-bar.show { opacity: 1; }
+
+/* platinum scrollbars — lavender ramp from the OS 9 progress bar */
+::-webkit-scrollbar { width: 15px; height: 15px; background: var(--g300); }
+::-webkit-scrollbar-track { background: var(--g200); border: 1px solid var(--g600);
+  box-shadow: inset 1px 1px 2px rgba(0,0,0,.15); }
+::-webkit-scrollbar-thumb { border: 1px solid var(--black);
+  background: linear-gradient(90deg, #33339a, #66c 18%, #9999fe 38%, #ccccfe 50%, #9999fe 62%, #66c 82%, #33339a); }
+::-webkit-scrollbar-thumb:horizontal {
+  background: linear-gradient(180deg, #33339a, #66c 18%, #9999fe 38%, #ccccfe 50%, #9999fe 62%, #66c 82%, #33339a); }
+::-webkit-scrollbar-corner { background: var(--g300); }
 </style>
 </head>
 <body>
-<header>
-  <div class="brand">exe<span class="sub">personal cloud</span></div>
-  <nav>
-    <button id="nav-vms" class="active">VMs</button>
-    <button id="nav-config">Config</button>
-  </nav>
-  <button id="cf-dot" title="Cloudflare status — checking…">
-    <span id="cf-dot-circle" class="dot"></span>
-    <span class="muted" style="font-size:13px">Cloudflare</span>
-  </button>
-  <input id="token" type="password" placeholder="API token" title="Only needed if api_token is set">
-</header>
 
-<main>
-<section id="tab-vms">
-  <div id="vm-list-view">
-    <div class="card">
-      <h3>New VM</h3>
-      <div class="row" style="align-items:flex-end">
-        <div class="field" style="width:150px">
+<div id="menubar">
+  <div class="menu appl" data-m="apple" title="About"><svg width="15" height="15" viewBox="0 0 32 32" shape-rendering="crispEdges"><rect x="6.5" y="1.5" width="19" height="24" fill="#DAD5CA" stroke="#000"/><rect x="9.5" y="4.5" width="13" height="10" fill="#6e6a61" stroke="#000"/><rect x="10.5" y="5.5" width="11" height="8" fill="#7FD67F" stroke="#000"/><rect x="12" y="18" width="8" height="2" fill="#55524B"/><rect x="9.5" y="25.5" width="13" height="3" fill="#C8C3B8" stroke="#000"/></svg></div>
+  <div class="menu" data-m="file">File</div>
+  <div class="menu" data-m="windows">Windows</div>
+  <div class="menu" data-m="special">Special</div>
+  <div class="mb-right">
+    <button id="cf-dot" title="Cloudflare status — checking…">
+      <span id="cf-dot-circle" class="dot"></span><span>Cloudflare</span>
+    </button>
+    <div id="clock"></div>
+  </div>
+</div>
+
+<div class="dropdown" id="dd-apple" hidden>
+  <div class="dd-item" data-act="about">About exe…</div>
+</div>
+<div class="dropdown" id="dd-file" hidden>
+  <div class="dd-item" data-act="newvm">New VM…</div>
+  <div class="dd-item" data-act="closewin">Close Window</div>
+  <div class="dd-sep"></div>
+  <div class="dd-item" data-act="refresh">Refresh</div>
+</div>
+<div class="dropdown" id="dd-windows" hidden>
+  <div class="dd-item" data-act="winvms">Virtual Machines</div>
+  <div class="dd-item" data-act="winconfig">Configuration</div>
+</div>
+<div class="dropdown" id="dd-special" hidden>
+  <div class="dd-item" data-act="cfstatus">Cloudflare Status…</div>
+  <div class="dd-item" data-act="cfwizard">Cloudflare Setup Wizard…</div>
+  <div class="dd-sep"></div>
+  <div class="dd-item" data-act="token">Set API Token…</div>
+</div>
+
+<div id="desktop">
+  <div id="icons"></div>
+  <div class="dicon" id="trash-icon">
+    <svg width="34" height="34" viewBox="0 0 32 32" shape-rendering="crispEdges"><rect x="13.5" y="2.5" width="5" height="2" fill="#C8C3B8" stroke="#000"/><rect x="8.5" y="4.5" width="15" height="3" fill="#D5D0C5" stroke="#000"/><rect x="9.5" y="7.5" width="13" height="21" fill="#CDC8BD" stroke="#000"/><path d="M12.5 10v16M15.5 10v16M18.5 10v16M21.5 10v16" stroke="#8B867B"/></svg>
+    <span class="lbl">Trash</span>
+  </div>
+
+  <!-- Virtual Machines -->
+  <div class="window" id="win-vms" style="left:36px; top:34px; width:680px;">
+    <div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
+      <div class="title">Virtual Machines</div>
+      <div class="stripe"></div><button class="tbox zoom"></button><button class="tbox shade"></button></div>
+    <div class="win-frame paper">
+      <div class="win-body">
+        <table>
+          <thead><tr><th>Name</th><th>State</th><th>Specs</th><th>IP</th><th></th></tr></thead>
+          <tbody id="vm-rows"></tbody>
+        </table>
+        <div class="muted" id="vm-empty" style="padding:10px" hidden>No VMs yet — choose File → New VM…</div>
+      </div>
+      <div class="statusbar">
+        <span id="vm-count">…</span>
+        <span class="muted">double-click a VM to open it</span>
+        <span style="flex:1"></span>
+        <button class="ghost sm" id="vms-new">New VM…</button>
+        <button class="ghost sm" id="vms-refresh">Refresh</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- VM detail -->
+  <div class="window" id="win-detail" style="left:150px; top:64px; width:640px;" hidden>
+    <div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
+      <div class="title" id="d-title">VM</div>
+      <div class="stripe"></div><button class="tbox zoom"></button><button class="tbox shade"></button></div>
+    <div class="win-frame">
+      <div class="win-body">
+        <div class="row">
+          <span class="chip" id="d-state"></span>
+          <span class="mono muted" id="d-ip"></span>
+        </div>
+
+        <div class="card">
+          <h3>Web Services</h3>
+          <div class="row" style="justify-content:flex-end; margin:0 0 6px">
+            <button class="ghost sm" id="svc-refresh">Refresh</button>
+          </div>
+          <div id="svc-list"><span class="muted">…</span></div>
+        </div>
+
+        <div class="card">
+          <h3>Terminal</h3>
+          <div class="row" style="justify-content:flex-end; margin:0 0 6px">
+            <button class="ghost sm" id="term-open">Connect</button>
+            <button class="ghost sm" id="term-close" hidden>Disconnect</button>
+          </div>
+          <div id="term-box" hidden></div>
+        </div>
+
+        <div class="card">
+          <h3>Vibe Code</h3>
+          <textarea id="a-prompt" placeholder="Build me a…"></textarea>
+          <div class="row" style="margin-top:10px; align-items:flex-end">
+            <div class="field" style="width:220px">
+              <label for="a-model">Model (blank = default)</label>
+              <input id="a-model">
+            </div>
+            <button class="btn" id="a-run">Run Agent</button>
+          </div>
+          <pre class="out" id="a-out" hidden></pre>
+        </div>
+
+        <div class="card">
+          <h3>Expose</h3>
+          <div class="row" style="align-items:flex-end">
+            <div class="field" style="width:100px">
+              <label for="e-port">VM port</label>
+              <input id="e-port" type="number" placeholder="8000">
+            </div>
+            <div class="field" style="width:230px">
+              <label for="e-sub">Subdomain (blank = VM name)</label>
+              <input id="e-sub">
+            </div>
+            <button class="btn" id="e-go">Expose</button>
+          </div>
+          <div id="e-result" class="mono muted"></div>
+        </div>
+
+        <div class="card">
+          <h3>Vibe Code Transcripts</h3>
+          <div id="t-list"><span class="muted">None yet.</span></div>
+          <pre class="out" id="t-log" hidden></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Configuration -->
+  <div class="window" id="win-config" style="left:80px; top:52px; width:660px;" hidden>
+    <div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
+      <div class="title">Configuration</div>
+      <div class="stripe"></div><button class="tbox zoom"></button><button class="tbox shade"></button></div>
+    <div class="win-frame">
+      <div class="win-body">
+        <div class="row" style="justify-content:space-between">
+          <span class="muted">~/.exe/config.json — fields marked &#42; need a daemon restart</span>
+          <button class="ghost sm" id="wiz-start">Cloudflare Setup Wizard…</button>
+        </div>
+        <div id="cfg-form"></div>
+        <div class="row" style="margin-top:14px">
+          <button class="btn" id="cfg-save">Save</button>
+          <span class="muted" id="cfg-status"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- New VM dialog -->
+  <div class="window" id="win-newvm" style="left:220px; top:120px; width:330px;" hidden>
+    <div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
+      <div class="title">New VM</div>
+      <div class="stripe"></div></div>
+    <div class="win-frame">
+      <div class="win-body">
+        <div class="field" style="margin-bottom:10px">
           <label for="c-name">Name</label>
-          <input id="c-name" placeholder="my-vm">
+          <input id="c-name" placeholder="my-vm" style="width:100%">
         </div>
-        <div class="field" style="width:80px">
-          <label for="c-cpus">CPUs</label>
-          <input id="c-cpus" type="number" placeholder="2">
+        <div class="row">
+          <div class="field" style="width:70px">
+            <label for="c-cpus">CPUs</label>
+            <input id="c-cpus" type="number" placeholder="2">
+          </div>
+          <div class="field" style="width:110px">
+            <label for="c-mem">Memory (MB)</label>
+            <input id="c-mem" type="number" placeholder="2048">
+          </div>
+          <div class="field" style="width:90px">
+            <label for="c-disk">Disk (GB)</label>
+            <input id="c-disk" type="number" placeholder="20">
+          </div>
         </div>
-        <div class="field" style="width:110px">
-          <label for="c-mem">Memory (MB)</label>
-          <input id="c-mem" type="number" placeholder="2048">
+        <div class="muted" id="c-status" style="min-height:16px"></div>
+        <div class="row" style="justify-content:flex-end; margin:10px 0 2px">
+          <button class="ghost" id="c-cancel">Cancel</button>
+          <button class="btn" id="c-go">Create</button>
         </div>
-        <div class="field" style="width:100px">
-          <label for="c-disk">Disk (GB)</label>
-          <input id="c-disk" type="number" placeholder="20">
-        </div>
-        <button class="btn" id="c-go">Create</button>
-        <span class="muted" id="c-status"></span>
       </div>
-    </div>
-    <div class="card">
-      <h3>Virtual machines</h3>
-      <table>
-        <thead><tr><th>Name</th><th>State</th><th>Specs</th><th>IP</th><th></th></tr></thead>
-        <tbody id="vm-rows"></tbody>
-      </table>
-      <div class="muted" id="vm-empty" hidden>No VMs yet — create one above.</div>
     </div>
   </div>
 
-  <div id="vm-detail" hidden>
-    <div class="row">
-      <button class="ghost" id="back">&larr; all VMs</button>
-      <h2 id="d-name" style="margin:0"></h2>
-      <span class="chip" id="d-state"></span>
-      <span class="mono muted" id="d-ip"></span>
-    </div>
-
-    <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <h3 style="margin:0">Web services</h3>
-        <button class="ghost" id="svc-refresh">Refresh</button>
-      </div>
-      <div id="svc-list" style="margin-top:8px"><span class="muted">…</span></div>
-    </div>
-
-    <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <h3 style="margin:0">Terminal</h3>
-        <div>
-          <button class="ghost" id="term-open">Connect</button>
-          <button class="ghost" id="term-close" hidden>Disconnect</button>
+  <!-- API token dialog -->
+  <div class="window" id="win-token" style="left:260px; top:150px; width:330px;" hidden>
+    <div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
+      <div class="title">API Token</div>
+      <div class="stripe"></div></div>
+    <div class="win-frame">
+      <div class="win-body">
+        <div class="muted" style="margin-bottom:8px">Only needed if <span class="mono">api_token</span> is set in the daemon config. Stored in this browser.</div>
+        <input id="token" type="password" placeholder="API token" style="width:100%">
+        <div class="row" style="justify-content:flex-end; margin:12px 0 2px">
+          <button class="btn" id="token-done">OK</button>
         </div>
       </div>
-      <div id="term-box" style="margin-top:8px" hidden></div>
-    </div>
-
-    <div class="card">
-      <h3>Vibe code</h3>
-      <textarea id="a-prompt" placeholder="Build me a…"></textarea>
-      <div class="row" style="margin-top:8px; align-items:flex-end">
-        <div class="field" style="width:220px">
-          <label for="a-model">Model (blank = default)</label>
-          <input id="a-model">
-        </div>
-        <button class="btn" id="a-run">Run agent</button>
-      </div>
-      <pre class="out" id="a-out" hidden></pre>
-    </div>
-
-    <div class="card">
-      <h3>Expose</h3>
-      <div class="row" style="align-items:flex-end">
-        <div class="field" style="width:110px">
-          <label for="e-port">VM port</label>
-          <input id="e-port" type="number" placeholder="8000">
-        </div>
-        <div class="field" style="width:230px">
-          <label for="e-sub">Subdomain (blank = VM name)</label>
-          <input id="e-sub">
-        </div>
-        <button class="btn" id="e-go">Expose</button>
-      </div>
-      <div id="e-result" class="mono muted"></div>
-    </div>
-
-    <div class="card">
-      <h3>Vibe code transcripts</h3>
-      <div id="t-list"><span class="muted">None yet.</span></div>
-      <pre class="out" id="t-log" hidden></pre>
     </div>
   </div>
-</section>
 
-<section id="tab-config" hidden>
-  <div class="card">
-    <div class="row" style="justify-content:space-between">
-      <h3 style="margin:0">Configuration <span class="muted" style="text-transform:none">(~/.exe/config.json — fields marked &#42; need a daemon restart)</span></h3>
-      <button class="ghost" id="wiz-start">Cloudflare setup wizard</button>
-    </div>
-    <div id="cfg-form"></div>
-    <div class="row" style="margin-top:14px">
-      <button class="btn" id="cfg-save">Save</button>
-      <span class="muted" id="cfg-status"></span>
+  <!-- About -->
+  <div class="window" id="win-about" style="left:300px; top:110px; width:340px;" hidden>
+    <div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
+      <div class="title">About exe</div>
+      <div class="stripe"></div></div>
+    <div class="win-frame">
+      <div class="win-body" style="text-align:center; padding:22px 16px">
+        <div id="about-icon"></div>
+        <div style="font-weight:bold; font-size:14px; margin-top:8px">exe</div>
+        <div class="muted" style="margin-top:2px">a personal cloud for this Mac</div>
+        <div class="muted" style="margin-top:10px">VMs by Virtualization.framework · vibe coding by Ollama<br>publishing by Cloudflare Tunnel</div>
+        <div style="margin-top:10px"><a href="https://github.com/livid/exe" target="_blank" rel="noopener">github.com/livid/exe</a></div>
+      </div>
     </div>
   </div>
-</section>
-</main>
 
-<div id="status-bar"></div>
-
-<div id="sum-overlay" class="overlay" hidden>
-  <div class="modal">
-    <div class="row" style="justify-content:space-between">
-      <h3 style="margin:0">Cloudflare status</h3>
-      <button class="ghost" id="sum-x" title="Close">&#10005;</button>
-    </div>
-    <div id="sum-body" style="margin-top:12px"></div>
-    <div class="row" style="justify-content:space-between; margin-top:18px">
-      <button class="ghost lg" id="sum-recheck">Re-check now</button>
-      <button class="btn" id="sum-restart">Start over&hellip;</button>
+  <!-- Trash -->
+  <div class="window" id="win-trash" style="left:340px; top:180px; width:300px;" hidden>
+    <div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
+      <div class="title">Trash</div>
+      <div class="stripe"></div><button class="tbox shade"></button></div>
+    <div class="win-frame">
+      <div class="win-body" style="text-align:center; padding:26px">
+        <span class="muted">The Trash is empty.<br>(Deleted VMs skip the Trash — sorry.)</span>
+      </div>
     </div>
   </div>
 </div>
 
-<div id="wiz-overlay" class="overlay" hidden>
-  <div class="modal">
-    <div class="row" style="justify-content:space-between">
-      <h3 id="wiz-title" style="margin:0"></h3>
-      <button class="ghost" id="wiz-x" title="Close">&#10005;</button>
+<div id="status-bar"></div>
+
+<!-- Cloudflare status summary (modal) -->
+<div id="sum-overlay" class="overlay" hidden>
+  <div class="window modal front">
+    <div class="titlebar"><button class="tbox close" id="sum-x"></button><div class="stripe"></div>
+      <div class="title">Cloudflare Status</div>
+      <div class="stripe"></div></div>
+    <div class="win-frame">
+      <div class="win-body">
+        <div id="sum-body"></div>
+        <div class="row" style="justify-content:space-between; margin-top:18px">
+          <button class="ghost" id="sum-recheck">Re-check Now</button>
+          <button class="btn" id="sum-restart">Start Over…</button>
+        </div>
+      </div>
     </div>
-    <div class="muted" id="wiz-ind" style="margin:2px 0 12px; font-size:12.5px"></div>
-    <div id="wiz-desc" style="margin-bottom:12px; font-size:14px"></div>
-    <div id="wiz-input"></div>
-    <div id="wiz-fb" style="margin-top:12px"></div>
-    <div class="row" style="justify-content:space-between; margin-top:18px">
-      <button class="ghost lg" id="wiz-back">&larr; Back</button>
-      <button class="btn" id="wiz-next">Validate &amp; continue</button>
+  </div>
+</div>
+
+<!-- Cloudflare wizard (modal) -->
+<div id="wiz-overlay" class="overlay" hidden>
+  <div class="window modal front">
+    <div class="titlebar"><button class="tbox close" id="wiz-x"></button><div class="stripe"></div>
+      <div class="title" id="wiz-title"></div>
+      <div class="stripe"></div></div>
+    <div class="win-frame">
+      <div class="win-body">
+        <div class="muted" id="wiz-ind" style="margin:0 0 10px"></div>
+        <div id="wiz-desc" style="margin-bottom:12px"></div>
+        <div id="wiz-input"></div>
+        <div id="wiz-fb" style="margin-top:12px"></div>
+        <div class="row" style="justify-content:space-between; margin-top:18px">
+          <button class="ghost" id="wiz-back">&larr; Back</button>
+          <button class="btn" id="wiz-next">Validate &amp; Continue</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -315,19 +552,169 @@ async function api(path, opts = {}) {
 }
 const j = (p, o) => api(p, o).then(r => r.json());
 
-// ---- tabs ----
-let activeTab = "vms";
-function showTab(t) {
-  activeTab = t;
-  $("#tab-vms").hidden = t !== "vms";
-  $("#tab-config").hidden = t !== "config";
-  $("#nav-vms").classList.toggle("active", t === "vms");
-  $("#nav-config").classList.toggle("active", t === "config");
-  if (t === "config") loadConfig().catch(e => toast(e.message));
-  if (t === "vms") loadVMs().catch(() => {});
+// ---- window manager ----
+let zTop = 10;
+function focusWin(w) {
+  zTop++;
+  w.style.zIndex = zTop;
+  // modals keep their hardcoded .front — only desktop windows trade focus
+  document.querySelectorAll("#desktop .window").forEach(x => x.classList.toggle("front", x === w));
 }
-$("#nav-vms").onclick = () => showTab("vms");
-$("#nav-config").onclick = () => showTab("config");
+function openWin(sel) {
+  const w = typeof sel === "string" ? $(sel) : sel;
+  w.hidden = false;
+  w.classList.remove("shaded");
+  focusWin(w);
+  return w;
+}
+function closeWin(w) {
+  w.hidden = true;
+  if (w.id === "win-detail") { closeTerm(); currentVM = null; }
+  if (w.id === "win-newvm") $("#c-status").textContent = "";
+}
+function closeFrontWindow() {
+  const wins = [...document.querySelectorAll("#desktop .window")].filter(w => !w.hidden);
+  wins.sort((a, b) => (+b.style.zIndex || 0) - (+a.style.zIndex || 0));
+  if (wins[0]) closeWin(wins[0]);
+}
+function initWindow(w) {
+  w.addEventListener("mousedown", () => { if (!w.closest(".overlay")) focusWin(w); });
+  const tb = w.querySelector(".titlebar");
+  const cb = tb.querySelector(".tbox.close");
+  if (cb && !cb.id) cb.addEventListener("click", e => { e.stopPropagation(); closeWin(w); });
+  const sb = tb.querySelector(".tbox.shade");
+  if (sb) sb.addEventListener("click", e => { e.stopPropagation(); w.classList.toggle("shaded"); termResize(); });
+  const zb = tb.querySelector(".tbox.zoom");
+  if (zb) zb.addEventListener("click", e => {
+    e.stopPropagation();
+    if (w._zoom) {
+      Object.assign(w.style, w._zoom);
+      w._zoom = null;
+    } else {
+      w._zoom = { left: w.style.left, top: w.style.top, width: w.style.width };
+      w.style.left = "8px";
+      w.style.top = "26px";
+      w.style.width = Math.min(window.innerWidth - 24, 1100) + "px";
+    }
+    focusWin(w);
+    termResize();
+  });
+  tb.addEventListener("dblclick", e => {
+    if (e.target.closest(".tbox") || w.classList.contains("modal")) return;
+    w.classList.toggle("shaded");
+    termResize();
+  });
+  if (w.classList.contains("modal")) return;
+  tb.addEventListener("pointerdown", e => {
+    if (e.target.closest(".tbox")) return;
+    e.preventDefault();
+    focusWin(w);
+    const r = w.getBoundingClientRect();
+    const ox = e.clientX - r.left, oy = e.clientY - r.top;
+    const move = ev => {
+      w.style.left = Math.min(window.innerWidth - 60, Math.max(60 - r.width, ev.clientX - ox)) + "px";
+      w.style.top = Math.min(window.innerHeight - 26, Math.max(20, ev.clientY - oy)) + "px";
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  });
+}
+document.querySelectorAll(".window").forEach(initWindow);
+
+// ---- menus ----
+let openMenuEl = null;
+function menuClose() {
+  if (!openMenuEl) return;
+  openMenuEl.classList.remove("open");
+  $("#dd-" + openMenuEl.dataset.m).hidden = true;
+  openMenuEl = null;
+}
+function menuShow(m) {
+  menuClose();
+  openMenuEl = m;
+  m.classList.add("open");
+  const dd = $("#dd-" + m.dataset.m);
+  dd.hidden = false;
+  dd.style.left = Math.min(m.getBoundingClientRect().left, window.innerWidth - dd.offsetWidth - 4) + "px";
+}
+document.querySelectorAll(".menu[data-m]").forEach(m => {
+  m.addEventListener("mousedown", e => {
+    e.preventDefault(); e.stopPropagation();
+    if (openMenuEl === m) menuClose(); else menuShow(m);
+  });
+  m.addEventListener("mouseenter", () => { if (openMenuEl && openMenuEl !== m) menuShow(m); });
+});
+document.addEventListener("mousedown", e => {
+  if (openMenuEl && !e.target.closest(".menu,.dropdown")) menuClose();
+});
+const ACTIONS = {
+  about: () => openWin("#win-about"),
+  newvm: () => { openWin("#win-newvm"); $("#c-name").focus(); },
+  closewin: closeFrontWindow,
+  refresh: () => { loadVMs().then(() => toast("Refreshed")).catch(e => toast(e.message)); },
+  winvms: () => openWin("#win-vms"),
+  winconfig: openConfigWin,
+  cfstatus: () => sumOpen(),
+  cfwizard: () => wizOpen(false),
+  token: () => { openWin("#win-token"); tokenInput.focus(); },
+};
+document.querySelectorAll(".dd-item").forEach(it => {
+  it.addEventListener("click", () => { menuClose(); const a = ACTIONS[it.dataset.act]; if (a) a(); });
+});
+
+// ---- clock ----
+function tickClock() {
+  $("#clock").textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+tickClock();
+setInterval(tickClock, 10000);
+
+// ---- desktop icons ----
+const SCREEN_COLORS = { running: "#7FD67F", starting: "#E8B34B", stopping: "#E8B34B", stopped: "#3A3F46", error: "#D66A6A" };
+function macIcon(state, size) {
+  const c = SCREEN_COLORS[state] || "#3A3F46";
+  return `<svg width="${size}" height="${size}" viewBox="0 0 32 32" shape-rendering="crispEdges">
+    <rect x="6.5" y="1.5" width="19" height="24" fill="#DAD5CA" stroke="#000"/>
+    <rect x="9.5" y="4.5" width="13" height="10" fill="#6e6a61" stroke="#000"/>
+    <rect x="10.5" y="5.5" width="11" height="8" fill="${c}" stroke="#000"/>
+    <rect x="12" y="18" width="8" height="2" fill="#55524B"/>
+    <rect x="20" y="21" width="3" height="2" fill="#B7B2A7"/>
+    <rect x="9.5" y="25.5" width="13" height="3" fill="#C8C3B8" stroke="#000"/>
+  </svg>`;
+}
+$("#about-icon").innerHTML = macIcon("running", 44);
+let selectedIcon = null;
+function renderIcons(vms) {
+  const box = $("#icons");
+  box.replaceChildren();
+  for (const vm of vms) {
+    const ic = el("div", { class: "dicon" + (selectedIcon === vm.name ? " sel" : ""), title: `${vm.name} — ${vm.state}` });
+    ic.innerHTML = macIcon(vm.state, 36);
+    ic.append(el("span", { class: "lbl" }, vm.name));
+    ic.addEventListener("click", e => {
+      e.stopPropagation();
+      selectedIcon = vm.name;
+      box.querySelectorAll(".dicon").forEach(d => d.classList.remove("sel"));
+      ic.classList.add("sel");
+    });
+    ic.addEventListener("dblclick", () => openVM(vm.name));
+    box.append(ic);
+  }
+}
+$("#desktop").addEventListener("mousedown", e => {
+  if (e.target === $("#desktop") || e.target === $("#icons")) {
+    selectedIcon = null;
+    document.querySelectorAll(".dicon").forEach(d => d.classList.remove("sel"));
+  }
+});
+const trashIcon = $("#trash-icon");
+trashIcon.addEventListener("click", e => { e.stopPropagation(); trashIcon.classList.add("sel"); selectedIcon = null; });
+trashIcon.addEventListener("dblclick", () => openWin("#win-trash"));
+document.addEventListener("mousedown", e => { if (!e.target.closest("#trash-icon")) trashIcon.classList.remove("sel"); });
 
 // ---- vm list ----
 let currentVM = null;
@@ -337,14 +724,16 @@ async function loadVMs() {
   const tb = $("#vm-rows");
   tb.replaceChildren();
   $("#vm-empty").hidden = vms.length > 0;
+  $("#vm-count").textContent = vms.length + (vms.length === 1 ? " item" : " items");
+  renderIcons(vms);
   for (const vm of vms) {
     const actions = el("td", {});
     if (vm.state === "running") {
-      actions.append(el("button", { class: "ghost", onclick: e => { e.stopPropagation(); vmAction(vm.name, "stop"); } }, "Stop"));
+      actions.append(el("button", { class: "ghost sm", onclick: e => { e.stopPropagation(); vmAction(vm.name, "stop"); } }, "Stop"));
     } else {
-      actions.append(el("button", { class: "ghost", onclick: e => { e.stopPropagation(); vmAction(vm.name, "start"); } }, "Start"));
+      actions.append(el("button", { class: "ghost sm", onclick: e => { e.stopPropagation(); vmAction(vm.name, "start"); } }, "Start"));
     }
-    const del = el("button", { class: "ghost danger", style: "margin-left:6px" }, "Delete");
+    const del = el("button", { class: "ghost sm danger", style: "margin-left:6px" }, "Delete");
     del.onclick = async e => {
       e.stopPropagation();
       if (!del.classList.contains("armed")) {
@@ -357,7 +746,7 @@ async function loadVMs() {
       catch (err) { toast(err.message); }
     };
     actions.append(del);
-    tb.append(el("tr", { class: "vm-row", onclick: () => openVM(vm.name) },
+    tb.append(el("tr", { class: "vm-row", ondblclick: () => openVM(vm.name) },
       el("td", { class: "mono" }, vm.name),
       el("td", {}, chip(vm.state)),
       el("td", { class: "muted" }, `${vm.cpus} cpu · ${vm.memory_mb} MB · ${vm.disk_gb} GB`),
@@ -372,6 +761,13 @@ async function vmAction(name, action) {
   loadVMs();
   if (currentVM === name) refreshDetailHead();
 }
+$("#vms-new").onclick = ACTIONS.newvm;
+$("#vms-refresh").onclick = ACTIONS.refresh;
+$("#c-cancel").onclick = () => closeWin($("#win-newvm"));
+$("#token-done").onclick = () => {
+  localStorage.setItem("exe_token", tokenInput.value);
+  closeWin($("#win-token"));
+};
 $("#c-go").onclick = async () => {
   const name = $("#c-name").value.trim();
   if (!name) { toast("name required"); return; }
@@ -386,6 +782,7 @@ $("#c-go").onclick = async () => {
     await j("/v1/vms", { method: "POST", json: body });
     $("#c-name").value = "";
     toast(name + " is ready");
+    closeWin($("#win-newvm"));
   } catch (e) { toast(e.message); }
   $("#c-go").disabled = false;
   $("#c-status").textContent = "";
@@ -393,19 +790,26 @@ $("#c-go").onclick = async () => {
 };
 
 // ---- vm detail ----
-$("#back").onclick = () => { closeTerm(); currentVM = null; $("#vm-detail").hidden = true; $("#vm-list-view").hidden = false; loadVMs(); };
 async function openVM(name) {
-  closeTerm();
+  if (currentVM !== name) closeTerm();
   currentVM = name;
-  $("#vm-list-view").hidden = true;
-  $("#vm-detail").hidden = false;
-  $("#d-name").textContent = name;
+  $("#d-title").textContent = name;
   $("#a-out").hidden = true;
   $("#t-log").hidden = true;
   $("#e-result").textContent = "";
+  openWin("#win-detail");
   await refreshDetailHead();
   loadPorts().catch(() => {});
   loadTranscripts().catch(e => toast(e.message));
+}
+async function refreshDetailHead() {
+  try {
+    const vm = await j("/v1/vms/" + currentVM);
+    const st = $("#d-state");
+    st.className = "chip " + vm.state;
+    st.textContent = vm.state;
+    $("#d-ip").textContent = vm.ip || "";
+  } catch (e) { toast(e.message); }
 }
 
 // ---- terminal ----
@@ -430,8 +834,8 @@ $("#term-open").onclick = () => {
   const box = $("#term-box");
   box.hidden = false;
   term = new Terminal({
-    fontSize: 13, cursorBlink: true,
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    fontSize: 12, cursorBlink: true,
+    fontFamily: '"Monaco", ui-monospace, SFMono-Regular, Menlo, monospace',
     theme: { background: "#000000" },
   });
   fitAddon = new FitAddon.FitAddon();
@@ -484,7 +888,7 @@ async function loadPorts() {
       el("span", { class: "muted" }, p.process || ""),
       el("a", { href: url, target: "_blank", rel: "noopener", class: "mono", style: "margin-left:auto" }, url + " ↗"));
     if (!publishedBackends.has(`http://${d.ip}:${p.port}`)) {
-      const exposeBtn = el("button", { class: "ghost" }, "Expose");
+      const exposeBtn = el("button", { class: "ghost sm" }, "Expose");
       exposeBtn.onclick = async () => {
         exposeBtn.disabled = true;
         exposeBtn.textContent = "Exposing…";
@@ -498,7 +902,7 @@ async function loadPorts() {
   }
   for (const [host, backend] of Object.entries(routes)) {
     if (!backend.startsWith(`http://${d.ip}:`)) continue;
-    const un = el("button", { class: "ghost danger" }, "Unexpose");
+    const un = el("button", { class: "ghost sm danger" }, "Unexpose");
     un.onclick = async () => {
       if (!un.classList.contains("armed")) {
         un.classList.add("armed");
@@ -528,15 +932,6 @@ async function loadPorts() {
   } else {
     box.append(...items);
   }
-}
-async function refreshDetailHead() {
-  try {
-    const vm = await j("/v1/vms/" + currentVM);
-    const st = $("#d-state");
-    st.className = "chip " + vm.state;
-    st.textContent = vm.state;
-    $("#d-ip").textContent = vm.ip || "";
-  } catch (e) { toast(e.message); }
 }
 
 // ---- agent ----
@@ -612,7 +1007,7 @@ async function loadTranscripts() {
   }
   for (const t of list) {
     const item = el("div", { class: "t-item" },
-      el("span", { class: "muted mono", style: "font-size:12px" }, fmtTime(t.started_at)),
+      el("span", { class: "muted mono", style: "font-size:11px" }, fmtTime(t.started_at)),
       chip(t.status),
       el("span", { class: "t-prompt", title: t.prompt }, t.prompt));
     item.onclick = async () => {
@@ -661,12 +1056,16 @@ const CONFIG_FIELDS = [
 const getPath = (o, p) => p.split(".").reduce((a, k) => (a == null ? a : a[k]), o);
 const setPath = (o, p, v) => { const ks = p.split("."); const last = ks.pop(); let t = o; for (const k of ks) { t[k] = t[k] || {}; t = t[k]; } t[last] = v; };
 let loadedConfig = null;
+function openConfigWin() {
+  openWin("#win-config");
+  loadConfig().catch(e => toast(e.message));
+}
 async function loadConfig() {
   loadedConfig = await j("/v1/config");
   const form = $("#cfg-form");
   form.replaceChildren();
   for (const g of CONFIG_FIELDS) {
-    form.append(el("h3", { style: "margin-top:14px" }, g.group));
+    form.append(el("h3", { style: "margin:14px 0 8px; font-size:11px; border-bottom:1px solid #aaa; padding-bottom:2px" }, g.group));
     const grid = el("div", { class: "grid" });
     for (const f of g.fields) {
       const val = getPath(loadedConfig, f.path);
@@ -746,6 +1145,7 @@ $("#wiz-start").onclick = () => wizOpen(false);
 $("#wiz-x").onclick = wizClose;
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
+  menuClose();
   if (!$("#wiz-overlay").hidden) wizClose();
   if (!$("#sum-overlay").hidden) $("#sum-overlay").hidden = true;
 });
@@ -763,17 +1163,17 @@ function wizOptionLabel(key, o) {
 
 function wizRender() {
   const step = WIZ_STEPS[wiz.idx];
-  $("#wiz-title").textContent = "Cloudflare setup — " + step.title;
+  $("#wiz-title").textContent = "Cloudflare Setup — " + step.title;
   $("#wiz-ind").textContent = `Step ${wiz.idx + 1} of ${WIZ_STEPS.length}`;
   $("#wiz-desc").replaceChildren(step.desc());
   $("#wiz-back").style.visibility = wiz.idx === 0 ? "hidden" : "visible";
-  $("#wiz-next").textContent = step.key === "review" ? "Save configuration" : "Validate & continue";
+  $("#wiz-next").textContent = step.key === "review" ? "Save Configuration" : "Validate & Continue";
   wizFeedback("", "");
   const box = $("#wiz-input");
   box.replaceChildren();
 
   if (step.key === "review") {
-    const rev = el("div", { class: "wiz-review mono", style: "font-size:13px" });
+    const rev = el("div", { class: "wiz-review mono", style: "font-size:12px" });
     const show = v => v || "—";
     rev.append(
       el("div", {}, el("span", { class: "muted" }, "api_token"), el("span", {}, wiz.values.api_token ? "••••" + wiz.values.api_token.slice(-4) : "—")),
@@ -864,7 +1264,7 @@ $("#wiz-next").onclick = async () => {
     }
   } catch (e) { wizFeedback("err", e.message); }
   btn.disabled = false;
-  btn.textContent = WIZ_STEPS[wiz.idx].key === "review" ? "Save configuration" : "Validate & continue";
+  btn.textContent = WIZ_STEPS[wiz.idx].key === "review" ? "Save Configuration" : "Validate & Continue";
 };
 
 // ---- cloudflare heartbeat ----
@@ -873,7 +1273,8 @@ async function cfHeartbeat(force) {
   try {
     const h = await j("/v1/cloudflare/health" + (force ? "?force=1" : ""));
     cfLast = h;
-    $("#cf-dot-circle").style.background = h.status === "ok" ? "var(--green)" : "var(--yellow)";
+    $("#cf-dot-circle").style.background =
+      `radial-gradient(circle at 30% 28%, rgba(255,255,255,.85), rgba(255,255,255,0) 55%), ${h.status === "ok" ? "var(--green)" : "#e0c341"}`;
     $("#cf-dot").title = h.message || ("Cloudflare status: " + h.status);
   } catch (e) { /* keep last known color */ }
 }
@@ -897,7 +1298,7 @@ function renderSum() {
     body.append(el("div", { class: "wiz-fb " + (cfLast.status === "ok" ? "ok" : "warn") },
       cfLast.message || cfLast.status));
   }
-  const rev = el("div", { class: "wiz-review mono", style: "font-size:13px; margin-top:12px" });
+  const rev = el("div", { class: "wiz-review mono", style: "font-size:12px; margin-top:12px" });
   const row = (k, v) => el("div", {}, el("span", { class: "muted" }, k), el("span", {}, v || "—"));
   rev.append(
     row("api_token", c.api_token ? "••••" + c.api_token.slice(-4) : ""),
@@ -916,7 +1317,7 @@ $("#sum-recheck").onclick = async () => {
   await cfHeartbeat(true);
   renderSum();
   b.disabled = false;
-  b.textContent = "Re-check now";
+  b.textContent = "Re-check Now";
 };
 $("#sum-restart").onclick = () => {
   $("#sum-overlay").hidden = true;
@@ -926,12 +1327,11 @@ setInterval(() => { if (!document.hidden) cfHeartbeat(false); }, 30000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) cfHeartbeat(false); });
 
 // ---- boot ----
+openWin("#win-vms");
 loadVMs().catch(e => toast(e.message));
 loadConfig().catch(() => {});
 cfHeartbeat(false);
-setInterval(() => {
-  if (!document.hidden && activeTab === "vms" && !currentVM) loadVMs().catch(() => {});
-}, 5000);
+setInterval(() => { if (!document.hidden) loadVMs().catch(() => {}); }, 5000);
 </script>
 </body>
 </html>
