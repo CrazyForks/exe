@@ -233,11 +233,22 @@ a.svc:hover { text-decoration: underline; }
 .t-item.sel { background: var(--hl); }
 .t-item.sel, .t-item.sel .muted, .t-item.sel .mono { color: #fff; }
 .t-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-#term-box { height: 380px; background: #000; border: 1px solid var(--black); padding: 5px 0 5px 5px;
-  box-shadow: -1px -1px 0 var(--g600), 1px 1px 0 #fff; }
-#term-box .xterm { height: 100%; }
-/* xterm.css defaults to overflow-y:scroll — track shows even with no scrollback */
-#term-box .xterm-viewport { overflow-y: auto !important; }
+/* overflow:clip — xterm's DOM renderer parks absolutely-positioned helpers
+   (IME textarea at the cursor, spare rows) below the visible screen; unclipped
+   they inflate every ancestor's scrollHeight and typing makes the browser
+   scroll .win-body to chase the focused hidden textarea. clip (not hidden)
+   also forbids programmatic scrolling of the frame itself. */
+#term-box { height: 380px; background: #000; border: 1px solid var(--black);
+  box-shadow: -1px -1px 0 var(--g600), 1px 1px 0 #fff; overflow: clip; }
+/* Text inset lives on .xterm, not the box: FitAddon subtracts element padding
+   when sizing rows, but the absolutely-positioned viewport anchors to the
+   padding box — so the scrollbar runs flush to the frame, OS 9 style. */
+#term-box .xterm { height: 100%; box-sizing: border-box; padding: 5px; }
+/* Always-on scrollbar, like a real OS 9 window: the track is permanent
+   (disabled-flat when there is no scrollback) and, because the bar exists
+   at open time, xterm measures it and sizes cols short of it — with
+   overflow:auto the bar appeared later, over the last column of text. */
+#term-box .xterm-viewport { overflow-y: scroll !important; }
 td .mono, td.mono { user-select: text; }
 
 /* wizard feedback */
@@ -257,14 +268,64 @@ td .mono, td.mono { user-select: text; }
   opacity: 0; transition: opacity .15s; pointer-events: none; max-width: 90vw; z-index: 4000; }
 #status-bar.show { opacity: 1; }
 
-/* platinum scrollbars — lavender ramp from the OS 9 progress bar */
-::-webkit-scrollbar { width: 15px; height: 15px; background: var(--g300); }
-::-webkit-scrollbar-track { background: var(--g200); border: 1px solid var(--g600);
-  box-shadow: inset 1px 1px 2px rgba(0,0,0,.15); }
-::-webkit-scrollbar-thumb { border: 1px solid var(--black);
-  background: linear-gradient(90deg, #33339a, #66c 18%, #9999fe 38%, #ccccfe 50%, #9999fe 62%, #66c 82%, #33339a); }
-::-webkit-scrollbar-thumb:horizontal {
-  background: linear-gradient(180deg, #33339a, #66c 18%, #9999fe 38%, #ccccfe 50%, #9999fe 62%, #66c 82%, #33339a); }
+/* Mac OS 9 scrollbars, pixel-sampled from a real OS 9.0.4 (Infinite Mac
+   canvas readback). 16px = 1px black rail each side + 14px interior.
+   Track: recessed gradient 777,888,aaa*10,bbb,ccc (lit from the far side).
+   Thumb: ccf | 99f*12 | 66c with black caps and 4 embossed ridges (7px
+   333399 lines shadow-offset from eee/ccf highlights) centered.
+   Buttons: ddd face, fff/bbb bevel, solid black 8x4 pixel triangle; both
+   arrows stacked at the end, as OS 9's default Smart Scrolling does. */
+::-webkit-scrollbar { width: 16px; height: 16px; }
+::-webkit-scrollbar-track:vertical { border-left: 1px solid var(--black); border-right: 1px solid var(--black);
+  background: linear-gradient(to right, #777 0, #777 1px, #888 1px, #888 2px, #aaa 2px, #aaa 12px, #bbb 12px, #bbb 13px, #ccc 13px, #ccc 14px); }
+::-webkit-scrollbar-track:horizontal { border-top: 1px solid var(--black); border-bottom: 1px solid var(--black);
+  background: linear-gradient(to bottom, #777 0, #777 1px, #888 1px, #888 2px, #aaa 2px, #aaa 12px, #bbb 12px, #bbb 13px, #ccc 13px, #ccc 14px); }
+::-webkit-scrollbar-thumb:vertical { border: 1px solid var(--black);
+  background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="14" height="8" shape-rendering="crispEdges"><rect x="3" y="0" width="1" height="1" fill="%23eeeeee"/><rect x="4" y="0" width="6" height="1" fill="%23ccccff"/><rect x="4" y="1" width="7" height="1" fill="%23333399"/><rect x="3" y="2" width="1" height="1" fill="%23eeeeee"/><rect x="4" y="2" width="6" height="1" fill="%23ccccff"/><rect x="4" y="3" width="7" height="1" fill="%23333399"/><rect x="3" y="4" width="1" height="1" fill="%23eeeeee"/><rect x="4" y="4" width="6" height="1" fill="%23ccccff"/><rect x="4" y="5" width="7" height="1" fill="%23333399"/><rect x="3" y="6" width="1" height="1" fill="%23eeeeee"/><rect x="4" y="6" width="6" height="1" fill="%23ccccff"/><rect x="4" y="7" width="7" height="1" fill="%23333399"/></svg>') center no-repeat,
+    linear-gradient(to right, #ccccff 0 1px, #9999ff 1px 13px, #6666cc 13px 14px);
+  box-shadow: inset 0 1px 0 #ccccff, inset 0 -1px 0 #6666cc; }
+::-webkit-scrollbar-thumb:horizontal { border: 1px solid var(--black);
+  background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="8" height="14" shape-rendering="crispEdges"><rect x="0" y="3" width="1" height="1" fill="%23eeeeee"/><rect x="0" y="4" width="1" height="6" fill="%23ccccff"/><rect x="1" y="4" width="1" height="7" fill="%23333399"/><rect x="2" y="3" width="1" height="1" fill="%23eeeeee"/><rect x="2" y="4" width="1" height="6" fill="%23ccccff"/><rect x="3" y="4" width="1" height="7" fill="%23333399"/><rect x="4" y="3" width="1" height="1" fill="%23eeeeee"/><rect x="4" y="4" width="1" height="6" fill="%23ccccff"/><rect x="5" y="4" width="1" height="7" fill="%23333399"/><rect x="6" y="3" width="1" height="1" fill="%23eeeeee"/><rect x="6" y="4" width="1" height="6" fill="%23ccccff"/><rect x="7" y="4" width="1" height="7" fill="%23333399"/></svg>') center no-repeat,
+    linear-gradient(to bottom, #ccccff 0 1px, #9999ff 1px 13px, #6666cc 13px 14px);
+  box-shadow: inset 1px 0 0 #ccccff, inset -1px 0 0 #6666cc; }
+::-webkit-scrollbar-button { display: block; width: 16px; height: 16px;
+  background: #ddd; border: 1px solid var(--black);
+  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #bbb;
+  background-position: center; background-repeat: no-repeat; }
+::-webkit-scrollbar-button:vertical:decrement {
+  background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="8" height="4" shape-rendering="crispEdges"><path fill="black" d="M3 0h2v1h-2z M2 1h4v1h-4z M1 2h6v1h-6z M0 3h8v1h-8z"/></svg>'); }
+::-webkit-scrollbar-button:vertical:increment {
+  background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="8" height="4" shape-rendering="crispEdges"><path fill="black" d="M0 0h8v1h-8z M1 1h6v1h-6z M2 2h4v1h-4z M3 3h2v1h-2z"/></svg>'); }
+::-webkit-scrollbar-button:horizontal:decrement {
+  background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="4" height="8" shape-rendering="crispEdges"><path fill="black" d="M0 3h1v2h-1z M1 2h1v4h-1z M2 1h1v6h-1z M3 0h1v8h-1z"/></svg>'); }
+::-webkit-scrollbar-button:horizontal:increment {
+  background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="4" height="8" shape-rendering="crispEdges"><path fill="black" d="M0 0h1v8h-1z M1 1h1v6h-1z M2 2h1v4h-1z M3 3h1v2h-1z"/></svg>'); }
+/* OS 9 Smart Scrolling default: both arrows stacked at the end. All four
+   button slots render once sized; hide the two at the start. */
+::-webkit-scrollbar-button:vertical:start:decrement,
+::-webkit-scrollbar-button:vertical:start:increment,
+::-webkit-scrollbar-button:horizontal:start:decrement,
+::-webkit-scrollbar-button:horizontal:start:increment { display: none; }
+/* Disabled (nothing to scroll), sampled from OS 9: the strip goes flat #eee
+   between the rails, arrows ghost to #888 with no button face or bevel,
+   and a 1px #888 line separates the two arrows. */
+::-webkit-scrollbar-track:disabled { background: #eee; }
+::-webkit-scrollbar-button:disabled { background-color: #eee; box-shadow: none; border: 0; }
+::-webkit-scrollbar-button:vertical:disabled { border-left: 1px solid var(--black); border-right: 1px solid var(--black); }
+::-webkit-scrollbar-button:horizontal:disabled { border-top: 1px solid var(--black); border-bottom: 1px solid var(--black); }
+::-webkit-scrollbar-button:vertical:end:increment:disabled { border-top: 1px solid #888; }
+::-webkit-scrollbar-button:horizontal:end:increment:disabled { border-left: 1px solid #888; }
+/* OS 9 draws a darker #555 line where the disabled arrow pair meets the track */
+::-webkit-scrollbar-button:vertical:end:decrement:disabled { border-top: 1px solid #555; }
+::-webkit-scrollbar-button:horizontal:end:decrement:disabled { border-left: 1px solid #555; }
+::-webkit-scrollbar-button:vertical:decrement:disabled {
+  background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="8" height="4" shape-rendering="crispEdges"><path fill="%23888888" d="M3 0h2v1h-2z M2 1h4v1h-4z M1 2h6v1h-6z M0 3h8v1h-8z"/></svg>'); }
+::-webkit-scrollbar-button:vertical:increment:disabled {
+  background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="8" height="4" shape-rendering="crispEdges"><path fill="%23888888" d="M0 0h8v1h-8z M1 1h6v1h-6z M2 2h4v1h-4z M3 3h2v1h-2z"/></svg>'); }
+::-webkit-scrollbar-button:horizontal:decrement:disabled {
+  background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="4" height="8" shape-rendering="crispEdges"><path fill="%23888888" d="M0 3h1v2h-1z M1 2h1v4h-1z M2 1h1v6h-1z M3 0h1v8h-1z"/></svg>'); }
+::-webkit-scrollbar-button:horizontal:increment:disabled {
+  background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="4" height="8" shape-rendering="crispEdges"><path fill="%23888888" d="M0 0h1v8h-1z M1 1h1v6h-1z M2 2h1v4h-1z M3 3h1v2h-1z"/></svg>'); }
 ::-webkit-scrollbar-corner { background: var(--g300); }
 </style>
 </head>
@@ -876,6 +937,10 @@ async function refreshDetailHead() {
 
 // ---- terminal ----
 let term = null, termWS = null, fitAddon = null;
+// xterm scrolls its scrollback itself (the viewport is a sibling of the
+// screen the cursor hovers, so it is never in the browser's scroll chain);
+// swallow the default here or leftover wheel deltas scroll the window body.
+$("#term-box").addEventListener("wheel", e => e.preventDefault(), { passive: false });
 function closeTerm() {
   window.removeEventListener("resize", termResize);
   if (termWS) { termWS.onclose = null; try { termWS.close(); } catch (e) {} termWS = null; }
