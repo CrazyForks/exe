@@ -1453,11 +1453,13 @@ function renderSum() {
   }
   const rev = el("div", { class: "wiz-review mono", style: "font-size:12px; margin-top:12px" });
   const row = (k, v) => el("div", {}, el("span", { class: "muted" }, k), el("span", {}, v || "—"));
+  const mask = v => (v && v.length >= 12) ? v.slice(0, 4) + "••••" + v.slice(-4) : v;
   rev.append(
     row("api_token", c.api_token ? "••••" + c.api_token.slice(-4) : ""),
-    row("account_id", c.account_id),
-    row("zone_id", c.zone_id),
-    row("tunnel_id", c.tunnel_id),
+    row("account_id", mask(c.account_id)),
+    row("zone_id", mask(c.zone_id)),
+    row("tunnel_id", cfLast && cfLast.tunnel_name && c.tunnel_id
+      ? cfLast.tunnel_name + " (" + mask(c.tunnel_id) + ")" : mask(c.tunnel_id)),
     row("domain", c.domain),
     row("last checked", cfLast && cfLast.checked_at ? new Date(cfLast.checked_at).toLocaleString() : ""));
   body.append(rev);

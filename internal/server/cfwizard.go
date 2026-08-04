@@ -68,6 +68,7 @@ func (s *Server) cfProbe(ctx context.Context) map[string]any {
 	client := &cf.Client{Token: c.APIToken, AccountID: c.AccountID, ZoneID: c.ZoneID, TunnelID: c.TunnelID, Domain: c.Domain}
 
 	var problems, notes []string
+	tunnelName := ""
 	if err := client.VerifyToken(ctx); err != nil {
 		problems = append(problems, "token: "+err.Error())
 	} else {
@@ -77,6 +78,7 @@ func (s *Server) cfProbe(ctx context.Context) map[string]any {
 		if t, err := client.GetTunnel(ctx, c.TunnelID); err != nil {
 			problems = append(problems, "tunnel: "+err.Error())
 		} else {
+			tunnelName = t.Name
 			switch t.Status {
 			case "healthy":
 			case "degraded":
@@ -90,16 +92,24 @@ func (s *Server) cfProbe(ctx context.Context) map[string]any {
 		}
 	}
 	if len(problems) > 0 {
-		return map[string]any{
+		res := map[string]any{
 			"status":  "error",
 			"message": "Cloudflare problem: " + strings.Join(problems, "; ") + " — click to run the setup wizard.",
 		}
+		if tunnelName != "" {
+			res["tunnel_name"] = tunnelName
+		}
+		return res
 	}
 	msg := "Cloudflare is working: token, DNS access, and tunnel all check out."
 	if len(notes) > 0 {
 		msg += " (" + strings.Join(notes, "; ") + ")"
 	}
-	return map[string]any{"status": "ok", "message": msg}
+	res := map[string]any{"status": "ok", "message": msg}
+	if tunnelName != "" {
+		res["tunnel_name"] = tunnelName
+	}
+	return res
 }
 
 // handleCFWizard validates one step of the Cloudflare setup wizard.
