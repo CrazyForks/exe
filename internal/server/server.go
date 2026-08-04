@@ -34,6 +34,10 @@ type Server struct {
 	KeyPath  string
 	StateDir string
 
+	// Logs, when set by main, holds the daemon log ring that GET /v1/logs
+	// streams to the web UI.
+	Logs *LogBuffer
+
 	// OnRebind, when set, is called after a config PUT changes listen,
 	// proxy_listen or ssh_listen so the daemon can re-bind those listeners
 	// in-process — VMs live in this process and survive.
@@ -81,6 +85,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/tailscale", s.handleTailscale)
 	mux.HandleFunc("GET /v1/routes", s.handleRoutes)
 	mux.HandleFunc("DELETE /v1/routes/{host}", s.handleRouteDelete)
+	mux.HandleFunc("GET /v1/logs", s.handleLogs)
 	mux.Handle("GET /ui/", uiStatic)
 	mux.HandleFunc("GET /", s.handleUI)
 	return s.auth(mux)
@@ -301,6 +306,7 @@ func (s *Server) exposeVM(ctx context.Context, info *vmm.Info, name, sub string,
 	fqdn := sub + "." + cfg.Cloudflare.Domain
 	backend := "http://" + net.JoinHostPort(info.IP, strconv.Itoa(port))
 	if err := s.Proxy.Set(fqdn, backend); err != nil {
+		log.Printf("expose %s: proxy: %v", fqdn, err)
 		return nil, err
 	}
 
@@ -344,6 +350,9 @@ func (s *Server) exposeVM(ctx context.Context, info *vmm.Info, name, sub string,
 	}
 	if len(warnings) > 0 {
 		res["warnings"] = warnings
+		log.Printf("expose %s -> %s: %s", fqdn, backend, strings.Join(warnings, "; "))
+	} else {
+		log.Printf("expose %s -> %s", fqdn, backend)
 	}
 	return res, nil
 }
@@ -475,15 +484,14 @@ func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.Proxy.Snapshot())
 }
 
-// removeRoute unpublishes a hostname: proxy route, Cloudflare DNS record,
-// and tunnel ingress rule.
+// removeRoute unpublishes a hostname: Cloudflare DNS record and tunnel
+// ingress rule first, then the local proxy route. Cloudflare failures abort
+// before local state changes, so a failed unexpose leaves the route visible;
+// both Cloudflare deletes no-op when the record is already gone, so retries
+// after a partial failure are safe.
 func (s *Server) removeRoute(ctx context.Context, host string) (map[string]any, error) {
 	cfg := s.Config()
-	if err := s.Proxy.Remove(host); err != nil {
-		return nil, err
-	}
 	res := map[string]any{"status": "removed"}
-	var warnings []string
 	cfc := &cf.Client{
 		Token:     cfg.Cloudflare.APIToken,
 		AccountID: cfg.Cloudflare.AccountID,
@@ -495,20 +503,54 @@ func (s *Server) removeRoute(ctx context.Context, host string) (map[string]any, 
 		ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		defer cancel()
 		if err := cfc.DeleteDNS(ctx, host); err != nil {
-			warnings = append(warnings, "dns: "+err.Error())
-		} else {
-			res["dns"] = "removed"
+			log.Printf("unexpose %s: dns: %v", host, err)
+			return nil, fmt.Errorf("dns: %w", err)
 		}
+		res["dns"] = "removed"
 		if err := cfc.RemoveIngress(ctx, host); err != nil {
-			warnings = append(warnings, "ingress: "+err.Error())
-		} else {
-			res["ingress"] = "removed"
+			log.Printf("unexpose %s: ingress: %v", host, err)
+			return nil, fmt.Errorf("ingress: %w", err)
+		}
+		res["ingress"] = "removed"
+	}
+	if err := s.Proxy.Remove(host); err != nil {
+		log.Printf("unexpose %s: proxy: %v", host, err)
+		return nil, err
+	}
+	log.Printf("unexpose %s: removed", host)
+	return res, nil
+}
+
+// handleLogs streams the daemon log as plain text: the buffered backlog
+// first, then live lines until the client disconnects.
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	if s.Logs == nil {
+		writeErr(w, http.StatusNotFound, errors.New("log streaming not available"))
+		return
+	}
+	backlog, ch, cancel := s.Logs.Subscribe()
+	defer cancel()
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	fl, _ := w.(http.Flusher)
+	for _, ln := range backlog {
+		fmt.Fprintln(w, ln)
+	}
+	if fl != nil {
+		fl.Flush()
+	}
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case ln := <-ch:
+			fmt.Fprintln(w, ln)
+			if fl != nil {
+				fl.Flush()
+			}
 		}
 	}
-	if len(warnings) > 0 {
-		res["warnings"] = warnings
-	}
-	return res, nil
 }
 
 func (s *Server) handleRouteDelete(w http.ResponseWriter, r *http.Request) {

@@ -235,6 +235,13 @@ pre.out { background: #10120f; color: #cfe3cf; border: 1px solid var(--black); p
   margin: 10px 0 0; font-family: var(--mono); font-size: 11px; max-height: 380px; overflow: auto;
   white-space: pre-wrap; word-break: break-word; user-select: text;
   box-shadow: -1px -1px 0 var(--g600), 1px 1px 0 #fff; }
+/* Daemon Log window: resizable via an OS 9 grow box in the frame corner;
+   the bottom strip is a plain status area like classic IE/Netscape.
+   16px total (border-box) so the strip's border-top is the same line as
+   the grow box tile's top separator row. */
+#win-log .statusbar { height: 16px; padding: 0 26px 0 8px; }
+#log-grow { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; }
+#log-out { margin: 0; height: 380px; max-height: none; }
 /* sunken white list, like a Finder list view */
 .listbox { background: #fff; border: 1px solid var(--black); max-height: 240px; overflow: auto;
   box-shadow: -1px -1px 0 var(--g600), -1px 0 0 var(--g600), 0 -1px 0 var(--g600),
@@ -371,6 +378,7 @@ td .mono, td.mono { user-select: text; }
 <div class="dropdown" id="dd-windows" hidden>
   <div class="dd-item" data-act="winvms">Virtual Machines</div>
   <div class="dd-item" data-act="winconfig">Configuration</div>
+  <div class="dd-item" data-act="winlog">Daemon Log</div>
 </div>
 <div class="dropdown" id="dd-special" hidden>
   <div class="dd-item" data-act="cfstatus">Cloudflare Status…</div>
@@ -498,6 +506,32 @@ td .mono, td.mono { user-select: text; }
           <button class="btn" id="cfg-save">Save</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Daemon log -->
+  <div class="window" id="win-log" style="left:110px; top:90px; width:640px;" hidden>
+    <div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
+      <div class="title">Daemon Log</div>
+      <div class="stripe"></div><button class="tbox zoom"></button><button class="tbox shade"></button></div>
+    <div class="win-frame">
+      <div class="win-body" style="padding:8px">
+        <pre class="out" id="log-out"></pre>
+      </div>
+      <div class="statusbar">
+        <span id="log-status">…</span>
+      </div>
+      <!-- grow box sampled pixel-for-pixel from Mac OS 9 (Infinite Mac):
+           black separators, white highlight, #ccc face, three diagonal
+           ridges of white over #777 with #aaa anti-aliased tail ends -->
+      <svg id="log-grow" width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges">
+        <rect width="16" height="16" fill="#ccc"/>
+        <path fill="#000" d="M0 0h16v1H0zM0 1h1v15H0z"/>
+        <path fill="#fff" d="M1 1h15v1H1zM1 2h1v14H1z"/>
+        <path fill="#fff" d="M9 4h2v1H9zM8 5h1v1H8zM7 6h1v1H7zM6 7h1v1H6zM5 8h1v1H5zM4 9h1v1H4zM11 6h2v1h-2zM10 7h1v1h-1zM9 8h1v1H9zM8 9h1v1H8zM7 10h1v1H7zM6 11h1v1H6zM13 8h2v1h-2zM12 9h1v1h-1zM11 10h1v1h-1zM10 11h1v1h-1zM9 12h1v1H9zM8 13h1v1H8z"/>
+        <path fill="#777" d="M10 5h1v1h-1zM9 6h1v1H9zM8 7h1v1H8zM7 8h1v1H7zM6 9h1v1H6zM5 10h1v1H5zM12 7h1v1h-1zM11 8h1v1h-1zM10 9h1v1h-1zM9 10h1v1H9zM8 11h1v1H8zM7 12h1v1H7zM14 9h1v1h-1zM13 10h1v1h-1zM12 11h1v1h-1zM11 12h1v1h-1zM10 13h1v1h-1zM9 14h1v1H9z"/>
+        <path fill="#aaa" d="M4 10h1v1H4zM6 12h1v1H6zM8 14h1v1H8z"/>
+      </svg>
     </div>
   </div>
 
@@ -688,6 +722,7 @@ function closeWin(w) {
   w.hidden = true;
   if (w.id === "win-detail") { closeTerm(); currentVM = null; }
   if (w.id === "win-newvm") $("#c-status").textContent = "";
+  if (w.id === "win-log") stopLogStream();
 }
 function closeFrontWindow() {
   const wins = [...document.querySelectorAll("#desktop .window")].filter(w => !w.hidden);
@@ -778,6 +813,7 @@ const ACTIONS = {
   refresh: () => { loadVMs().then(() => toast("Refreshed")).catch(e => toast(e.message)); },
   winvms: () => openWin("#win-vms"),
   winconfig: openConfigWin,
+  winlog: openLogWin,
   cfstatus: () => sumOpen(),
   cfwizard: () => wizOpen(false),
   token: () => { openWin("#win-token"); tokenInput.focus(); },
@@ -1133,6 +1169,65 @@ async function loadPorts() {
         el("th", {}, "Port"), el("th", {}, "Process"), el("th", {}, "Local"), el("th", {}, "Published"), el("th", {}, ""))),
       tbody)));
 }
+
+// ---- daemon log ----
+let logAbort = null, logRetry = null;
+function stopLogStream() {
+  clearTimeout(logRetry);
+  logRetry = null;
+  if (logAbort) { logAbort.abort(); logAbort = null; }
+}
+function openLogWin() {
+  openWin("#win-log");
+  if (!logAbort) streamLog();
+}
+async function streamLog() {
+  stopLogStream();
+  const ac = logAbort = new AbortController();
+  const out = $("#log-out"), st = $("#log-status");
+  out.textContent = "";
+  st.textContent = "connecting…";
+  try {
+    const resp = await api("/v1/logs", { signal: ac.signal });
+    st.textContent = "streaming";
+    const rd = resp.body.getReader();
+    const dec = new TextDecoder();
+    for (;;) {
+      const { done, value } = await rd.read();
+      if (done) break;
+      // stick to the bottom only if the user hasn't scrolled up
+      const stick = out.scrollHeight - out.scrollTop - out.clientHeight < 4;
+      out.textContent += dec.decode(value, { stream: true });
+      if (out.textContent.length > 400000) out.textContent = out.textContent.slice(-300000);
+      if (stick) out.scrollTop = out.scrollHeight;
+    }
+  } catch (e) {
+    if (ac.signal.aborted) return;
+  }
+  // stream ended or errored without an abort (e.g. daemon restart):
+  // keep retrying quietly while the window is open
+  logAbort = null;
+  st.textContent = "disconnected — reconnecting…";
+  logRetry = setTimeout(streamLog, 3000);
+}
+$("#log-grow").addEventListener("pointerdown", e => {
+  e.preventDefault(); e.stopPropagation();
+  const w = $("#win-log"), out = $("#log-out");
+  focusWin(w);
+  const sw = w.offsetWidth, sh = out.offsetHeight, sx = e.clientX, sy = e.clientY;
+  const stick = out.scrollHeight - out.scrollTop - out.clientHeight < 4;
+  const move = ev => {
+    w.style.width = Math.max(380, Math.min(window.innerWidth - 40, sw + ev.clientX - sx)) + "px";
+    out.style.height = Math.max(96, Math.min(window.innerHeight - 170, sh + ev.clientY - sy)) + "px";
+    if (stick) out.scrollTop = out.scrollHeight;
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+});
 
 // ---- agent ----
 $("#a-run").onclick = async () => {

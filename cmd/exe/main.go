@@ -103,9 +103,18 @@ func main() {
 // ---- daemon ----------------------------------------------------------------
 
 func cmdServe() error {
+	// Tee the daemon log into a ring buffer so the web UI can stream it
+	// (GET /v1/logs); the terminal still gets everything on stderr.
+	logs := server.NewLogBuffer(1000)
+	log.SetOutput(io.MultiWriter(os.Stderr, logs))
 	cfg, err := config.Load()
 	if err != nil {
 		return err
+	}
+	// File-back the ring so the log survives restarts. After config.Load so
+	// the state dir exists; failure just means a memory-only log.
+	if err := logs.Persist(filepath.Join(config.Dir(), "daemon.log")); err != nil {
+		log.Printf("daemon.log: %v (log will not survive restarts)", err)
 	}
 	stateDir := config.Dir()
 	privKey, pubKey, err := keys.Ensure(stateDir)
@@ -126,6 +135,7 @@ func cmdServe() error {
 		return err
 	}
 	srv := server.New(cfg, mgr, px, privKey, stateDir)
+	srv.Logs = logs
 	gate, err := server.NewSSHGate(srv)
 	if err != nil {
 		return err
