@@ -220,10 +220,14 @@ pre.out { background: #10120f; color: #cfe3cf; border: 1px solid var(--black); p
   margin: 10px 0 0; font-family: var(--mono); font-size: 11px; max-height: 380px; overflow: auto;
   white-space: pre-wrap; word-break: break-word; user-select: text;
   box-shadow: -1px -1px 0 var(--g600), 1px 1px 0 #fff; }
-.svc-item { display: flex; gap: 10px; align-items: center; min-height: 27px; padding: 3px 8px;
-  border: 1px solid var(--g600); background: var(--g200); margin-bottom: 5px;
-  box-shadow: inset 1px 1px 0 #fff; }
-.svc-item:last-child, .t-item:last-child { margin-bottom: 0; }
+/* sunken white list, like a Finder list view */
+.listbox { background: #fff; border: 1px solid var(--black); max-height: 240px; overflow: auto;
+  box-shadow: -1px -1px 0 var(--g600), -1px 0 0 var(--g600), 0 -1px 0 var(--g600),
+    1px 1px 0 #fff, 1px 0 0 #fff, 0 1px 0 #fff; }
+.listbox td { white-space: nowrap; }
+a.svc { color: #202a87; text-decoration: none; }
+a.svc:hover { text-decoration: underline; }
+.t-item:last-child { margin-bottom: 0; }
 .t-item { padding: 3px 8px; border: 1px solid var(--g600); background: var(--g200); margin-bottom: 5px;
   display: flex; gap: 10px; align-items: center; min-height: 27px; box-shadow: inset 1px 1px 0 #fff; }
 .t-item.sel { background: var(--hl); }
@@ -232,7 +236,7 @@ pre.out { background: #10120f; color: #cfe3cf; border: 1px solid var(--black); p
 #term-box { height: 380px; background: #000; border: 1px solid var(--black); padding: 5px 0 5px 5px;
   box-shadow: -1px -1px 0 var(--g600), 1px 1px 0 #fff; }
 #term-box .xterm { height: 100%; }
-td .mono, .svc-item .mono { user-select: text; }
+td .mono, td.mono { user-select: text; }
 
 /* wizard feedback */
 .wiz-fb { border: 1px solid; padding: 7px 10px; font-size: 11.5px; white-space: pre-wrap; }
@@ -626,7 +630,7 @@ function initWindow(w) {
     } else {
       w._zoom = { left: w.style.left, top: w.style.top, width: w.style.width };
       w.style.left = "8px";
-      w.style.top = "26px";
+      w.style.top = "8px";
       w.style.width = Math.min(window.innerWidth - 24, 1100) + "px";
     }
     focusWin(w);
@@ -642,11 +646,14 @@ function initWindow(w) {
     if (e.target.closest(".tbox")) return;
     e.preventDefault();
     focusWin(w);
-    const r = w.getBoundingClientRect();
-    const ox = e.clientX - r.left, oy = e.clientY - r.top;
+    // grab offset in #desktop coordinates (offsetLeft/Top) — client rects are
+    // viewport-based, and the desktop origin sits 20px lower (menu bar), which
+    // made windows jump down by that much on the first move
+    const ox = e.clientX - w.offsetLeft, oy = e.clientY - w.offsetTop;
+    const width = w.offsetWidth;
     const move = ev => {
-      w.style.left = Math.min(window.innerWidth - 60, Math.max(60 - r.width, ev.clientX - ox)) + "px";
-      w.style.top = Math.min(window.innerHeight - 26, Math.max(20, ev.clientY - oy)) + "px";
+      w.style.left = Math.min(window.innerWidth - 60, Math.max(60 - width, ev.clientX - ox)) + "px";
+      w.style.top = Math.min(window.innerHeight - 46, Math.max(0, ev.clientY - oy)) + "px";
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
@@ -929,62 +936,74 @@ async function loadPorts() {
     return;
   }
   const routes = await j("/v1/routes").catch(() => ({}));
-  const publishedBackends = new Set();
+  // one row per service: published routes are merged onto their port by backend
+  const prefix = `http://${d.ip}:`;
+  const hostForPort = {};
   for (const [host, backend] of Object.entries(routes)) {
-    if (backend.startsWith(`http://${d.ip}:`)) publishedBackends.add(backend);
+    if (backend.startsWith(prefix)) hostForPort[parseInt(backend.slice(prefix.length), 10)] = host;
   }
-  const items = [];
-  for (const p of d.ports) {
-    const url = `http://${d.ip}:${p.port}/`;
-    const row = el("div", { class: "svc-item" },
-      el("span", { class: "mono" }, ":" + p.port),
-      el("span", { class: "muted" }, p.process || ""),
-      el("a", { href: url, target: "_blank", rel: "noopener", class: "mono", style: "margin-left:auto" }, url + " ↗"));
-    if (!publishedBackends.has(`http://${d.ip}:${p.port}`)) {
-      const exposeBtn = el("button", { class: "ghost sm" }, "Expose");
-      exposeBtn.onclick = async () => {
-        exposeBtn.disabled = true;
-        exposeBtn.textContent = "Exposing…";
-        await doExpose(p.port, "");
-        exposeBtn.disabled = false;
-        exposeBtn.textContent = "Expose";
-      };
-      row.append(exposeBtn);
-    }
-    items.push(row);
+  const svcs = d.ports.map(p => ({ port: p.port, process: p.process || "", host: hostForPort[p.port] }));
+  for (const port of Object.keys(hostForPort).map(Number)) {
+    if (!svcs.some(s => s.port === port)) svcs.push({ port, process: "", host: hostForPort[port], dead: true });
   }
-  for (const [host, backend] of Object.entries(routes)) {
-    if (!backend.startsWith(`http://${d.ip}:`)) continue;
-    const un = el("button", { class: "ghost sm danger" }, "Unexpose");
-    un.onclick = async () => {
-      if (!un.classList.contains("armed")) {
-        un.classList.add("armed");
-        un.textContent = "Sure?";
-        setTimeout(() => { un.classList.remove("armed"); un.textContent = "Unexpose"; }, 3000);
-        return;
-      }
-      un.disabled = true;
-      un.textContent = "Removing…";
-      try {
-        const res = await j("/v1/routes/" + encodeURIComponent(host), { method: "DELETE" });
-        let msg = host + " unpublished";
-        for (const wmsg of res.warnings || []) msg += " — ⚠ " + wmsg;
-        toast(msg);
-      } catch (e) { toast(e.message); }
-      loadPorts().catch(() => {});
-    };
-    items.push(el("div", { class: "svc-item" },
-      el("span", { class: "chip running" }, "published"),
-      el("a", { href: "https://" + host, target: "_blank", rel: "noopener", class: "mono" }, "https://" + host + " ↗"),
-      el("span", { class: "muted mono", style: "margin-left:auto" }, "→ " + backend),
-      un));
-  }
+  svcs.sort((a, b) => a.port - b.port);
+
   box.replaceChildren();
-  if (!items.length) {
+  if (!svcs.length) {
     box.append(el("span", { class: "muted" }, "Nothing listening besides SSH yet. Switch to the Agent tab and ask it to build & start something, then hit Refresh."));
-  } else {
-    box.append(...items);
+    return;
   }
+  const tbody = el("tbody", {});
+  for (const s of svcs) {
+    let pub, action;
+    if (s.host) {
+      pub = el("span", { style: "display:inline-flex; align-items:center; gap:6px" },
+        el("span", { class: "chip running" }),
+        el("a", { href: "https://" + s.host, target: "_blank", rel: "noopener", class: "mono svc" }, s.host + " ↗"));
+      const un = el("button", { class: "ghost sm danger" }, "Unexpose");
+      un.onclick = async () => {
+        if (!un.classList.contains("armed")) {
+          un.classList.add("armed");
+          un.textContent = "Sure?";
+          setTimeout(() => { un.classList.remove("armed"); un.textContent = "Unexpose"; }, 3000);
+          return;
+        }
+        un.disabled = true;
+        un.textContent = "Removing…";
+        try {
+          const res = await j("/v1/routes/" + encodeURIComponent(s.host), { method: "DELETE" });
+          let msg = s.host + " unpublished";
+          for (const wmsg of res.warnings || []) msg += " — ⚠ " + wmsg;
+          toast(msg);
+        } catch (e) { toast(e.message); }
+        loadPorts().catch(() => {});
+      };
+      action = un;
+    } else {
+      pub = el("span", { class: "muted" }, "—");
+      const ex = el("button", { class: "ghost sm" }, "Expose");
+      ex.onclick = async () => {
+        ex.disabled = true;
+        ex.textContent = "Exposing…";
+        await doExpose(s.port, "");
+        ex.disabled = false;
+        ex.textContent = "Expose";
+      };
+      action = ex;
+    }
+    tbody.append(el("tr", {},
+      el("td", { class: "mono" }, String(s.port)),
+      el("td", { class: "muted" }, s.dead ? "not listening" : s.process),
+      el("td", {}, s.dead ? el("span", { class: "muted" }, "—")
+        : el("a", { href: `http://${d.ip}:${s.port}/`, target: "_blank", rel: "noopener", class: "mono svc" }, `${d.ip}:${s.port} ↗`)),
+      el("td", {}, pub),
+      el("td", { style: "text-align:right" }, action)));
+  }
+  box.append(el("div", { class: "listbox" },
+    el("table", {},
+      el("thead", {}, el("tr", {},
+        el("th", {}, "Port"), el("th", {}, "Process"), el("th", {}, "Local"), el("th", {}, "Published"), el("th", {}, ""))),
+      tbody)));
 }
 
 // ---- agent ----
