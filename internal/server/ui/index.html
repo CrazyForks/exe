@@ -1478,6 +1478,12 @@ $("#cfg-save").onclick = async () => {
     let msg = "saved";
     if (res.rebinding) msg += " — " + res.rebinding.join(" & ") + " rebinding now (reload the page if it moved)";
     if (res.restart_required) msg += " — click Restart Daemon… to apply: " + res.restart_required.join(", ");
+    if (res.ingress_synced) {
+      const n = res.ingress_synced.length;
+      msg += n ? " — repointed " + n + " public route" + (n === 1 ? "" : "s") + ": " + res.ingress_synced.join(", ")
+               : " — public routes already up to date";
+    }
+    if (res.ingress_warning) msg += " — " + res.ingress_warning;
     $("#cfg-status").textContent = msg;
     toast(msg);
   } catch (e) { toast(e.message); }

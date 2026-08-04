@@ -297,6 +297,62 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 
 // exposeVM wires <sub>.<domain> through the local proxy to the VM's port
 // and, when Cloudflare is configured, ensures the DNS record and tunnel
+// advertiseService is the origin URL cloudflared should dial to reach this
+// daemon's reverse proxy: http://<advertise_host>:<proxy port>. Empty when
+// advertise_host is unset.
+func advertiseService(cfg *config.Config) string {
+	if cfg.AdvertiseHost == "" {
+		return ""
+	}
+	port := cfg.ProxyListen
+	if i := strings.LastIndex(port, ":"); i >= 0 {
+		port = port[i+1:]
+	}
+	return "http://" + net.JoinHostPort(cfg.AdvertiseHost, port)
+}
+
+// syncIngressRoutes repoints the tunnel ingress rule of every exposed
+// hostname at svc, adding rules that are missing (e.g. exposed while
+// advertise_host was still empty). Returns the hostnames changed plus a
+// warning describing anything skipped or failed.
+func (s *Server) syncIngressRoutes(ctx context.Context, cfg *config.Config, svc string) ([]string, string) {
+	if svc == "" {
+		return nil, "advertise_host is empty; existing tunnel ingress rules were left as-is"
+	}
+	cfc := &cf.Client{
+		Token:     cfg.Cloudflare.APIToken,
+		AccountID: cfg.Cloudflare.AccountID,
+		ZoneID:    cfg.Cloudflare.ZoneID,
+		TunnelID:  cfg.Cloudflare.TunnelID,
+		Domain:    cfg.Cloudflare.Domain,
+	}
+	if !cfc.Configured() {
+		return nil, "cloudflare not fully configured; tunnel ingress rules were not updated"
+	}
+	suffix := "." + cfg.Cloudflare.Domain
+	services := map[string]string{}
+	for host := range s.Proxy.Snapshot() {
+		if strings.HasSuffix(host, suffix) {
+			services[host] = svc
+		}
+	}
+	if len(services) == 0 {
+		return []string{}, ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	changed, err := cfc.SyncIngress(ctx, services)
+	if err != nil {
+		log.Printf("config: ingress sync to %s: %v", svc, err)
+		return nil, "ingress sync failed: " + err.Error()
+	}
+	if changed == nil {
+		changed = []string{}
+	}
+	log.Printf("config: repointed %d of %d ingress rule(s) to %s", len(changed), len(services), svc)
+	return changed, ""
+}
+
 // ingress rule. The caller validates port and cloudflare.domain first.
 func (s *Server) exposeVM(ctx context.Context, info *vmm.Info, name, sub string, port int) (map[string]any, error) {
 	cfg := s.Config()
@@ -331,19 +387,12 @@ func (s *Server) exposeVM(ctx context.Context, info *vmm.Info, name, sub string,
 		} else {
 			res["dns"] = "ok"
 		}
-		if cfg.AdvertiseHost == "" {
+		if svc := advertiseService(cfg); svc == "" {
 			warnings = append(warnings, "advertise_host not set; skipped tunnel ingress update")
+		} else if err := cfc.EnsureIngress(ctx, fqdn, svc); err != nil {
+			warnings = append(warnings, "ingress: "+err.Error())
 		} else {
-			proxyPort := cfg.ProxyListen
-			if i := strings.LastIndex(proxyPort, ":"); i >= 0 {
-				proxyPort = proxyPort[i+1:]
-			}
-			svc := "http://" + net.JoinHostPort(cfg.AdvertiseHost, proxyPort)
-			if err := cfc.EnsureIngress(ctx, fqdn, svc); err != nil {
-				warnings = append(warnings, "ingress: "+err.Error())
-			} else {
-				res["ingress"] = svc
-			}
+			res["ingress"] = svc
 		}
 	} else {
 		warnings = append(warnings, "cloudflare not fully configured; only the local proxy route was added")
@@ -462,22 +511,31 @@ func (s *Server) RestartDaemon(delay time.Duration, running []string) {
 	os.Exit(0)
 }
 
-// handleTailscale reports this host's Tailscale IPv4, detected as a CGNAT
+// TailscaleIP is this host's Tailscale IPv4, detected as a CGNAT
 // (100.64.0.0/10) address on a local interface — no tailscale CLI needed.
-func (s *Server) handleTailscale(w http.ResponseWriter, r *http.Request) {
-	res := map[string]any{"detected": false}
-	if addrs, err := net.InterfaceAddrs(); err == nil {
-		_, cgnat, _ := net.ParseCIDR("100.64.0.0/10")
-		for _, a := range addrs {
-			if ipn, ok := a.(*net.IPNet); ok {
-				if ip4 := ipn.IP.To4(); ip4 != nil && cgnat.Contains(ip4) {
-					res = map[string]any{"detected": true, "ip": ip4.String()}
-					break
-				}
+// Empty when not on a tailnet.
+func TailscaleIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	_, cgnat, _ := net.ParseCIDR("100.64.0.0/10")
+	for _, a := range addrs {
+		if ipn, ok := a.(*net.IPNet); ok {
+			if ip4 := ipn.IP.To4(); ip4 != nil && cgnat.Contains(ip4) {
+				return ip4.String()
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, res)
+	return ""
+}
+
+func (s *Server) handleTailscale(w http.ResponseWriter, r *http.Request) {
+	if ip := TailscaleIP(); ip != "" {
+		writeJSON(w, http.StatusOK, map[string]any{"detected": true, "ip": ip})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"detected": false})
 }
 
 func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {

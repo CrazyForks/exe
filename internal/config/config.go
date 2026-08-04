@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -99,6 +100,27 @@ func SSHEnabled(addr string) bool {
 	return true
 }
 
+// NormalizeListen makes listen addresses forgiving: a bare port ("8090")
+// becomes ":8090", surrounding whitespace is dropped, and anything else
+// (host:port, "off", empty) passes through unchanged.
+func NormalizeListen(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr != "" && !strings.ContainsAny(addr, ":.") {
+		if _, err := strconv.Atoi(addr); err == nil {
+			return ":" + addr
+		}
+	}
+	return addr
+}
+
+// Normalize cleans up user-entered values in place.
+func (c *Config) Normalize() {
+	c.Listen = NormalizeListen(c.Listen)
+	c.ProxyListen = NormalizeListen(c.ProxyListen)
+	c.SSHListen = NormalizeListen(c.SSHListen)
+	c.AdvertiseHost = strings.TrimSpace(c.AdvertiseHost)
+}
+
 // Load reads config.json over the defaults; secrets can also come from
 // OLLAMA_API_KEY, CLOUDFLARE_API_TOKEN and EXE_API_TOKEN.
 func Load() (*Config, error) {
@@ -111,6 +133,7 @@ func Load() (*Config, error) {
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
+	cfg.Normalize()
 	if v := os.Getenv("OLLAMA_API_KEY"); v != "" {
 		cfg.Ollama.APIKey = v
 	}

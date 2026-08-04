@@ -24,6 +24,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"exe/internal/agent"
 	"exe/internal/config"
 	"exe/internal/keys"
 	"exe/internal/proxy"
@@ -250,6 +251,19 @@ func cmdServe() error {
 		}()
 	}
 	log.Printf("exe daemon: API http://%s, proxy %s, state %s", displayAddr(cfg.Listen), cfg.ProxyListen, stateDir)
+	if ip := server.TailscaleIP(); ip != "" {
+		log.Printf("tailscale: %s", ip)
+	}
+	if cfg.Ollama.BaseURL != "" {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			v, err := agent.Version(ctx, agent.Config{BaseURL: cfg.Ollama.BaseURL, APIKey: cfg.Ollama.APIKey})
+			if err == nil {
+				log.Printf("ollama %s at %s", v, cfg.Ollama.BaseURL)
+			}
+		}()
+	}
 	if config.SSHEnabled(curSSH) {
 		log.Printf("ssh gate on %s: `ssh -p %s exe@<this host>` is the lobby, `ssh -p %s <vm>@<this host>` is the VM", curSSH, portOf(curSSH), portOf(curSSH))
 	}

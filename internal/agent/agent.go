@@ -127,6 +127,34 @@ func Run(ctx context.Context, cfg Config, target sshexec.Target, vmName, prompt 
 	return fmt.Errorf("agent stopped after %d turns without finishing", maxTurns)
 }
 
+// Version reports the Ollama server's version (GET /api/version).
+func Version(ctx context.Context, cfg Config) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		strings.TrimRight(cfg.BaseURL, "/")+"/api/version", nil)
+	if err != nil {
+		return "", err
+	}
+	if cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("ollama version: HTTP %d", resp.StatusCode)
+	}
+	var out struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || out.Version == "" {
+		return "", fmt.Errorf("parse ollama version: %s", sshexec.Truncate(string(raw), 200))
+	}
+	return out.Version, nil
+}
+
 func chat(ctx context.Context, cfg Config, msgs []message, tools []tool) (*chatResponse, error) {
 	body, err := json.Marshal(chatRequest{Model: cfg.Model, Messages: msgs, Tools: tools, Stream: false})
 	if err != nil {

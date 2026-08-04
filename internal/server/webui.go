@@ -163,6 +163,7 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	nc.Normalize()
 	b, err := json.MarshalIndent(nc, "", "  ")
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
@@ -204,6 +205,18 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 	}
 	if restart != nil {
 		res["restart_required"] = restart
+	}
+	// The advertised proxy origin changed (new advertise_host or proxy
+	// port): repoint every exposed hostname's tunnel ingress rule so
+	// published sites keep working.
+	if svc := advertiseService(&nc); svc != advertiseService(old) {
+		synced, warn := s.syncIngressRoutes(r.Context(), &nc, svc)
+		if synced != nil {
+			res["ingress_synced"] = synced
+		}
+		if warn != "" {
+			res["ingress_warning"] = warn
+		}
 	}
 	writeJSON(w, http.StatusOK, res)
 }

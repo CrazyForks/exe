@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -227,6 +228,80 @@ func (c *Client) EnsureDNS(ctx context.Context, fqdn string) error {
 		return c.do(ctx, "PUT", "/zones/"+c.ZoneID+"/dns_records/"+existing[0].ID, rec, nil)
 	}
 	return c.do(ctx, "POST", "/zones/"+c.ZoneID+"/dns_records", rec, nil)
+}
+
+// SyncIngress makes every hostname in services route to its service value:
+// existing rules are rewritten, hostnames without a rule get one appended
+// before the catch-all. One read-modify-write, so rules for other apps
+// sharing the tunnel are untouched. Returns the hostnames whose rules
+// actually changed; no PUT is issued when everything already matches.
+func (c *Client) SyncIngress(ctx context.Context, services map[string]string) ([]string, error) {
+	if len(services) == 0 {
+		return nil, nil
+	}
+	var got struct {
+		Config map[string]any `json:"config"`
+	}
+	path := "/accounts/" + c.AccountID + "/cfd_tunnel/" + c.TunnelID + "/configurations"
+	if err := c.do(ctx, "GET", path, nil, &got); err != nil {
+		return nil, err
+	}
+	cfg := got.Config
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
+	var rules []any
+	if r, ok := cfg["ingress"].([]any); ok {
+		rules = r
+	}
+
+	var changed []string
+	missing := make(map[string]string, len(services))
+	for h, svc := range services {
+		missing[h] = svc
+	}
+	for i, r := range rules {
+		m, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		h, _ := m["hostname"].(string)
+		svc, want := services[h]
+		if !want {
+			continue
+		}
+		delete(missing, h)
+		if cur, _ := m["service"].(string); cur != svc {
+			m["service"] = svc
+			rules[i] = m
+			changed = append(changed, h)
+		}
+	}
+	if len(missing) > 0 {
+		catchAll := map[string]any{"service": "http_status:404"}
+		if n := len(rules); n > 0 {
+			if m, ok := rules[n-1].(map[string]any); ok {
+				if h, _ := m["hostname"].(string); h == "" {
+					catchAll = m
+					rules = rules[:n-1]
+				}
+			}
+		}
+		for h, svc := range missing {
+			rules = append(rules, map[string]any{"hostname": h, "service": svc})
+			changed = append(changed, h)
+		}
+		rules = append(rules, catchAll)
+	}
+	if len(changed) == 0 {
+		return nil, nil
+	}
+	sort.Strings(changed)
+	cfg["ingress"] = rules
+	if err := c.do(ctx, "PUT", path, map[string]any{"config": cfg}, nil); err != nil {
+		return nil, err
+	}
+	return changed, nil
 }
 
 // EnsureIngress upserts an ingress rule hostname->service in the tunnel's
