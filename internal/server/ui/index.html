@@ -197,12 +197,27 @@ select { padding: 2px 4px; }
 
 /* ---------- finder-ish list ---------- */
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
+/* OS 9 list-view column headers, sampled from Extensions Manager:
+   #666|#fff top bevel, #ccc face, #888|#333 bottom shadow over the black
+   bar line, #888/#333/#fff column separators. The sort column is pressed:
+   #111|#555 over a #888 face with the bevel inverted (#aaa|#444). */
 th { text-align: left; font-size: 11px; font-weight: bold; padding: 3px 9px;
-  background: var(--g300);
-  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #aaa;
-  border-bottom: 1px solid var(--black); }
+  background: #ccc; cursor: default; user-select: none;
+  border-top: 1px solid #666; border-bottom: 1px solid var(--black);
+  border-right: 1px solid #333;
+  box-shadow: inset 1px 0 0 #fff, inset 0 1px 0 #fff,
+    inset 0 -1px 0 #333, inset 0 -2px 0 #888; }
+th:last-child { border-right: none; }
+th.sorted { background: #888; border-top-color: #111;
+  box-shadow: inset 1px 0 0 #555, inset 0 1px 0 #555,
+    inset 0 -1px 0 #444, inset 0 -2px 0 #aaa; }
+.sortarrow { font-size: 8px; margin-left: 5px; vertical-align: 1px; }
+/* actions column: shrink to its buttons, never wrap them */
+td.actions { white-space: nowrap; width: 1%; text-align: right; }
 td { padding: 4px 9px; border-bottom: 1px solid #efefef; }
 tr:last-child td { border-bottom: none; }
+/* OS 9 tints the sorted column's body one gray step (ExtMgr: #ddd on #eee) */
+td.sortcol { background: #eee; }
 tr.vm-row:hover td { background: #dfe3f5; }
 
 /* status chips */
@@ -379,7 +394,7 @@ td .mono, td.mono { user-select: text; }
     <div class="win-frame paper">
       <div class="win-body">
         <table>
-          <thead><tr><th>Name</th><th>State</th><th>Specs</th><th>IP</th><th></th></tr></thead>
+          <thead><tr id="vm-head"></tr></thead>
           <tbody id="vm-rows"></tbody>
         </table>
         <div class="muted" id="vm-empty" style="padding:10px" hidden>No VMs yet — choose File → New VM…</div>
@@ -823,21 +838,62 @@ document.addEventListener("mousedown", e => { if (!e.target.closest("#trash-icon
 
 // ---- vm list ----
 let currentVM = null;
+let lastVMs = [];
 function chip(state) { return el("span", { class: "chip " + state }, state); }
+
+// column sorting, OS 9 style: click a header to sort by it (again to flip),
+// or flip with the direction widget at the right end of the header bar
+const ipNum = ip => (ip || "").split(".").reduce((a, o) => a * 256 + (+o || 0), 0);
+const VM_COLS = [
+  { key: "name",  label: "Name",  cmp: (a, b) => a.name.localeCompare(b.name) },
+  { key: "state", label: "State", cmp: (a, b) => a.state.localeCompare(b.state) },
+  { key: "specs", label: "Specs", cmp: (a, b) => (a.cpus - b.cpus) || (a.memory_mb - b.memory_mb) || (a.disk_gb - b.disk_gb) },
+  { key: "ip",    label: "IP",    cmp: (a, b) => ipNum(a.ip) - ipNum(b.ip) },
+];
+let vmSort = { key: "name", dir: 1 };
+try { vmSort = { ...vmSort, ...JSON.parse(localStorage.getItem("exe_vmsort") || "{}") } } catch (e) {}
+function setVMSort(key, dir) {
+  vmSort = { key, dir };
+  localStorage.setItem("exe_vmsort", JSON.stringify(vmSort));
+  renderVMHead();
+  renderVMList(lastVMs);
+}
+function renderVMHead() {
+  const tr = $("#vm-head");
+  tr.replaceChildren();
+  for (const c of VM_COLS) {
+    const th = el("th", {
+      class: c.key === vmSort.key ? "sorted" : "",
+      onclick: () => setVMSort(c.key, c.key === vmSort.key ? -vmSort.dir : 1),
+    }, c.label);
+    if (c.key === vmSort.key) th.append(el("span", { class: "sortarrow" }, vmSort.dir === 1 ? "▲" : "▼"));
+    tr.append(th);
+  }
+  tr.append(el("th", {})); // actions
+}
+function sortedVMs(vms) {
+  const col = VM_COLS.find(c => c.key === vmSort.key) || VM_COLS[0];
+  return [...vms].sort((a, b) => (col.cmp(a, b) || a.name.localeCompare(b.name)) * vmSort.dir);
+}
+
 async function loadVMs() {
-  const vms = await j("/v1/vms");
+  renderVMList(await j("/v1/vms"));
+}
+function renderVMList(rawVMs) {
+  lastVMs = rawVMs;
+  const vms = sortedVMs(rawVMs);
   // skip the re-render when nothing changed — a rebuild mid-double-click
   // splits the two clicks across DOM generations and swallows the dblclick
-  const sig = JSON.stringify(vms);
-  if (sig === loadVMs._last) return;
-  loadVMs._last = sig;
+  const sig = JSON.stringify([vmSort, vms]);
+  if (sig === renderVMList._last) return;
+  renderVMList._last = sig;
   const tb = $("#vm-rows");
   tb.replaceChildren();
   $("#vm-empty").hidden = vms.length > 0;
   $("#vm-count").textContent = vms.length + (vms.length === 1 ? " item" : " items");
   renderIcons(vms);
   for (const vm of vms) {
-    const actions = el("td", {});
+    const actions = el("td", { class: "actions" });
     if (vm.state === "running") {
       actions.append(el("button", { class: "ghost sm", onclick: e => { e.stopPropagation(); vmAction(vm.name, "stop"); } }, "Stop"));
     } else {
@@ -856,12 +912,15 @@ async function loadVMs() {
       catch (err) { toast(err.message); }
     };
     actions.append(del);
-    tb.append(el("tr", { class: "vm-row", ondblclick: () => openVM(vm.name) },
+    const cells = [
       el("td", { class: "mono" }, vm.name),
       el("td", {}, chip(vm.state)),
       el("td", { class: "muted" }, `${vm.cpus} cpu · ${vm.memory_mb} MB · ${vm.disk_gb} GB`),
       el("td", { class: "mono" }, vm.ip || "—"),
-      actions));
+    ];
+    const sc = VM_COLS.findIndex(c => c.key === vmSort.key);
+    if (cells[sc]) cells[sc].classList.add("sortcol");
+    tb.append(el("tr", { class: "vm-row", ondblclick: () => openVM(vm.name) }, ...cells, actions));
   }
 }
 async function vmAction(name, action) {
@@ -1295,7 +1354,7 @@ async function daemonRestart(btn) {
   }
   if (back) {
     toast("Daemon is back — previously running VMs are starting again.");
-    loadVMs._last = null;
+    renderVMList._last = null;
     loadVMs().catch(() => {});
     loadConfig().catch(() => {});
     cfHeartbeat(true);
@@ -1551,6 +1610,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) cfHe
 
 // ---- boot ----
 openWin("#win-vms");
+renderVMHead();
 loadVMs().catch(e => toast(e.message));
 loadConfig().catch(() => {});
 cfHeartbeat(false);
