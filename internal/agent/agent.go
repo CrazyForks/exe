@@ -1,11 +1,14 @@
 // Package agent implements a vibecoding loop: an Ollama (cloud or local)
 // model drives bash / write_file / read_file tools over SSH inside a VM.
+// The chat primitives (Message, Tool, Chat) are exported so the server can
+// run other tool loops — the system-wide chat window — on the same client.
 package agent
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -40,14 +43,14 @@ Rules:
 - Verify your work before finishing (e.g. curl -s http://localhost:PORT).
 - When everything works, reply WITHOUT any tool call: a short summary of what you built and the port the service listens on.`
 
-type message struct {
+type Message struct {
 	Role      string     `json:"role"`
 	Content   string     `json:"content"`
-	ToolCalls []toolCall `json:"tool_calls,omitempty"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 	ToolName  string     `json:"tool_name,omitempty"`
 }
 
-type toolCall struct {
+type ToolCall struct {
 	Function struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -60,25 +63,25 @@ type toolFunc struct {
 	Parameters  map[string]any `json:"parameters"`
 }
 
-type tool struct {
+type Tool struct {
 	Type     string   `json:"type"`
 	Function toolFunc `json:"function"`
 }
 
 type chatRequest struct {
 	Model    string    `json:"model"`
-	Messages []message `json:"messages"`
-	Tools    []tool    `json:"tools,omitempty"`
+	Messages []Message `json:"messages"`
+	Tools    []Tool    `json:"tools,omitempty"`
 	Stream   bool      `json:"stream"`
 }
 
-type chatResponse struct {
-	Message message `json:"message"`
+type ChatResponse struct {
+	Message Message `json:"message"`
 	Error   string  `json:"error,omitempty"`
 }
 
-func mkTool(name, desc string, props map[string]any, required []string) tool {
-	return tool{Type: "function", Function: toolFunc{
+func MkTool(name, desc string, props map[string]any, required []string) Tool {
+	return Tool{Type: "function", Function: toolFunc{
 		Name:        name,
 		Description: desc,
 		Parameters: map[string]any{
@@ -91,24 +94,24 @@ func mkTool(name, desc string, props map[string]any, required []string) tool {
 
 // Run executes the agent loop until the model stops calling tools.
 func Run(ctx context.Context, cfg Config, target sshexec.Target, vmName, prompt string, logf Logf) error {
-	tools := []tool{
-		mkTool("bash", "Run a shell command on the VM; returns combined output and exit code.", map[string]any{
+	tools := []Tool{
+		MkTool("bash", "Run a shell command on the VM; returns combined output and exit code.", map[string]any{
 			"command": map[string]any{"type": "string", "description": "shell command to run"},
 		}, []string{"command"}),
-		mkTool("write_file", "Create or overwrite a file on the VM; parent directories are created.", map[string]any{
+		MkTool("write_file", "Create or overwrite a file on the VM; parent directories are created.", map[string]any{
 			"path":    map[string]any{"type": "string"},
 			"content": map[string]any{"type": "string"},
 		}, []string{"path", "content"}),
-		mkTool("read_file", "Read a text file from the VM.", map[string]any{
+		MkTool("read_file", "Read a text file from the VM.", map[string]any{
 			"path": map[string]any{"type": "string"},
 		}, []string{"path"}),
 	}
-	msgs := []message{
+	msgs := []Message{
 		{Role: "system", Content: fmt.Sprintf(systemPromptTmpl, vmName, target.User)},
 		{Role: "user", Content: prompt},
 	}
 	for turn := 0; turn < maxTurns; turn++ {
-		resp, err := chat(ctx, cfg, msgs, tools)
+		resp, err := Chat(ctx, cfg, msgs, tools)
 		if err != nil {
 			return err
 		}
@@ -121,7 +124,7 @@ func Run(ctx context.Context, cfg Config, target sshexec.Target, vmName, prompt 
 		}
 		for _, tc := range resp.Message.ToolCalls {
 			result := execTool(ctx, target, tc, logf)
-			msgs = append(msgs, message{Role: "tool", ToolName: tc.Function.Name, Content: result})
+			msgs = append(msgs, Message{Role: "tool", ToolName: tc.Function.Name, Content: result})
 		}
 	}
 	return fmt.Errorf("agent stopped after %d turns without finishing", maxTurns)
@@ -155,17 +158,20 @@ func Version(ctx context.Context, cfg Config) (string, error) {
 	return out.Version, nil
 }
 
-func chat(ctx context.Context, cfg Config, msgs []message, tools []tool) (*chatResponse, error) {
-	body, err := json.Marshal(chatRequest{Model: cfg.Model, Messages: msgs, Tools: tools, Stream: false})
+// chatHTTP posts one /api/chat request and returns the raw response for the
+// caller to decode; non-200s are drained into the error. cancel bounds the
+// whole exchange (including streaming reads) to 5 minutes.
+func chatHTTP(ctx context.Context, cfg Config, msgs []Message, tools []Tool, stream bool) (*http.Response, context.CancelFunc, error) {
+	body, err := json.Marshal(chatRequest{Model: cfg.Model, Messages: msgs, Tools: tools, Stream: stream})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	rctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
 	req, err := http.NewRequestWithContext(rctx, http.MethodPost,
 		strings.TrimRight(cfg.BaseURL, "/")+"/api/chat", bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		cancel()
+		return nil, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if cfg.APIKey != "" {
@@ -173,14 +179,28 @@ func chat(ctx context.Context, cfg Config, msgs []message, tools []tool) (*chatR
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		cancel()
+		return nil, nil, fmt.Errorf("ollama %s: HTTP %d: %s", cfg.Model, resp.StatusCode, sshexec.Truncate(string(raw), 2000))
+	}
+	return resp, cancel, nil
+}
+
+// Chat sends one non-streaming chat completion request to Ollama.
+func Chat(ctx context.Context, cfg Config, msgs []Message, tools []Tool) (*ChatResponse, error) {
+	resp, cancel, err := chatHTTP(ctx, cfg, msgs, tools, false)
+	if err != nil {
 		return nil, err
 	}
+	defer cancel()
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ollama %s: HTTP %d: %s", cfg.Model, resp.StatusCode, sshexec.Truncate(string(raw), 2000))
-	}
-	var out chatResponse
+	var out ChatResponse
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, fmt.Errorf("parse ollama response: %w: %s", err, sshexec.Truncate(string(raw), 2000))
 	}
@@ -190,8 +210,52 @@ func chat(ctx context.Context, cfg Config, msgs []message, tools []tool) (*chatR
 	return &out, nil
 }
 
-func execTool(ctx context.Context, target sshexec.Target, tc toolCall, logf Logf) string {
-	args := parseArgs(tc.Function.Arguments)
+// ChatStream sends one streaming chat request, calling onDelta with each
+// content fragment as it arrives, and returns the fully assembled message
+// (content concatenated, tool calls collected across chunks).
+func ChatStream(ctx context.Context, cfg Config, msgs []Message, tools []Tool, onDelta func(string)) (*Message, error) {
+	resp, cancel, err := chatHTTP(ctx, cfg, msgs, tools, true)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	defer resp.Body.Close()
+	full := Message{Role: "assistant"}
+	dec := json.NewDecoder(resp.Body)
+	for {
+		var chunk struct {
+			Message Message `json:"message"`
+			Done    bool    `json:"done"`
+			Error   string  `json:"error,omitempty"`
+		}
+		if err := dec.Decode(&chunk); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("stream ollama response: %w", err)
+		}
+		if chunk.Error != "" {
+			return nil, fmt.Errorf("ollama: %s", chunk.Error)
+		}
+		if chunk.Message.Role != "" {
+			full.Role = chunk.Message.Role
+		}
+		if chunk.Message.Content != "" {
+			full.Content += chunk.Message.Content
+			if onDelta != nil {
+				onDelta(chunk.Message.Content)
+			}
+		}
+		full.ToolCalls = append(full.ToolCalls, chunk.Message.ToolCalls...)
+		if chunk.Done {
+			break
+		}
+	}
+	return &full, nil
+}
+
+func execTool(ctx context.Context, target sshexec.Target, tc ToolCall, logf Logf) string {
+	args := ParseArgs(tc.Function.Arguments)
 	str := func(k string) string { v, _ := args[k].(string); return v }
 	tctx, cancel := context.WithTimeout(ctx, toolTimeout)
 	defer cancel()
@@ -234,8 +298,8 @@ func execTool(ctx context.Context, target sshexec.Target, tc toolCall, logf Logf
 	}
 }
 
-// parseArgs tolerates both a JSON object and a JSON-encoded string of one.
-func parseArgs(raw json.RawMessage) map[string]any {
+// ParseArgs tolerates both a JSON object and a JSON-encoded string of one.
+func ParseArgs(raw json.RawMessage) map[string]any {
 	args := map[string]any{}
 	if len(raw) == 0 {
 		return args

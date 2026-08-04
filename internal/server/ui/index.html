@@ -8,6 +8,8 @@
 <link rel="stylesheet" href="/ui/vendor/xterm.css">
 <script src="/ui/vendor/xterm.js"></script>
 <script src="/ui/vendor/xterm-addon-fit.js"></script>
+<script src="/ui/vendor/marked.min.js"></script>
+<script src="/ui/vendor/purify.min.js"></script>
 <style>
 /* Mac OS 9 Platinum — pixel values from macthemes.garden's implementation */
 :root {
@@ -61,7 +63,7 @@ a { color: #202a87; text-decoration: underline; }
 
 /* ---------- desktop icons ---------- */
 #desktop { position: fixed; inset: 20px 0 0 0; }
-#icons { position: absolute; top: 14px; right: 8px; bottom: 110px;
+#icons { position: absolute; top: 14px; right: 8px; bottom: 190px;
   display: flex; flex-direction: column; flex-wrap: wrap-reverse; align-content: flex-end;
   gap: 16px 8px; z-index: 1; }
 .dicon { width: 82px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
@@ -71,6 +73,7 @@ a { color: #202a87; text-decoration: underline; }
 .dicon.sel svg { filter: brightness(.55) saturate(1.3) drop-shadow(1px 1px 0 rgba(0,0,0,.4)); }
 .dicon.sel .lbl { background: var(--hl); text-shadow: none; }
 #trash-icon { position: absolute; bottom: 16px; right: 14px; z-index: 1; }
+#chat-icon { position: absolute; bottom: 96px; right: 14px; z-index: 1; }
 
 /* ---------- window chrome (macthemes.garden-accurate) ---------- */
 .window {
@@ -273,6 +276,57 @@ a.svc:hover { text-decoration: underline; }
 #term-box .xterm-viewport { overflow-y: scroll !important; }
 td .mono, td.mono { user-select: text; }
 
+/* ---------- chat window ---------- */
+.chat-wrap { display: flex; gap: 10px; height: 432px; }
+.chat-side { width: 190px; flex: none; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.chat-sessions { flex: 1; max-height: none; overflow: auto; }
+.cs-item { display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 8px; border-bottom: 1px solid #efefef; }
+.cs-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-time { font-size: 10px; color: #777; }
+.cs-item.sel { background: var(--hl); }
+.cs-item.sel .cs-title, .cs-item.sel .cs-time { color: #fff; }
+.chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.chat-msgs { flex: 1; overflow-y: scroll; background: #fff; border: 1px solid var(--black);
+  padding: 10px; user-select: text;
+  box-shadow: -1px -1px 0 var(--g600), -1px 0 0 var(--g600), 0 -1px 0 var(--g600),
+    1px 1px 0 #fff, 1px 0 0 #fff, 0 1px 0 #fff; }
+.msg { margin: 0 0 10px; }
+.msg.user { background: var(--lav); border: 1px solid #99c; padding: 5px 9px; margin-left: 48px;
+  white-space: pre-wrap; overflow-wrap: break-word; box-shadow: 1px 1px 0 #99c; }
+/* assistant messages are rendered markdown (marked + DOMPurify) */
+.msg.asst { overflow-wrap: break-word; margin-right: 24px; }
+.msg.asst > :first-child { margin-top: 0; }
+.msg.asst > :last-child { margin-bottom: 0; }
+.msg.asst p, .msg.asst ul, .msg.asst ol, .msg.asst table, .msg.asst blockquote { margin: 6px 0; }
+.msg.asst h1, .msg.asst h2, .msg.asst h3, .msg.asst h4 { margin: 10px 0 4px; }
+.msg.asst h1 { font-size: 14px; } .msg.asst h2 { font-size: 13px; }
+.msg.asst h3, .msg.asst h4 { font-size: 12px; }
+.msg.asst ul, .msg.asst ol { padding-left: 22px; }
+.msg.asst li { margin: 2px 0; }
+.msg.asst code { font-family: var(--mono); font-size: 11px; background: #efefea;
+  border: 1px solid var(--g400); padding: 0 3px; }
+.msg.asst pre { background: #f4f4ef; border: 1px solid var(--g500); padding: 6px 8px;
+  margin: 6px 0; overflow-x: auto; box-shadow: inset 1px 1px 0 #fff; }
+.msg.asst pre code { background: none; border: none; padding: 0; white-space: pre; }
+.msg.asst blockquote { padding: 2px 10px; border-left: 3px solid var(--g500); color: #555; }
+.msg.asst table { width: auto; min-width: 50%; border: 1px solid var(--g600); }
+.msg.asst hr { border: none; border-top: 1px solid var(--g500); margin: 8px 0; }
+.msg.asst img { max-width: 100%; }
+.msg.tool { font-family: var(--mono); font-size: 11px; color: #555; margin: 0 24px 6px 0;
+  padding: 1px 0 1px 8px; border-left: 3px solid var(--g500); white-space: pre-wrap; overflow-wrap: break-word; }
+.msg.tool-out { font-family: var(--mono); font-size: 11px; color: #444; background: #f4f4ef;
+  border: 1px solid var(--g500); margin: -2px 24px 10px 11px; padding: 5px 8px;
+  max-height: 130px; overflow: auto; white-space: pre-wrap; overflow-wrap: break-word; }
+.msg.err { background: #f6dddd; border: 1px solid #a33; color: #7a1010; padding: 5px 9px; white-space: pre-wrap; }
+.msg.think { color: #777; }
+.msg.think::after { content: "…"; animation: think 1.2s steps(4) infinite; display: inline-block;
+  overflow: hidden; vertical-align: bottom; width: 0; }
+@keyframes think { to { width: 14px; } }
+.chat-hint { color: #777; text-align: center; padding: 40px 30px 0; }
+.chat-inrow { display: flex; gap: 8px; align-items: flex-end; }
+.chat-inrow textarea { flex: 1; min-height: 46px; }
+.chat-inrow .btn { margin-bottom: 2px; }
+
 /* wizard feedback */
 .wiz-fb { border: 1px solid; padding: 7px 10px; font-size: 11.5px; white-space: pre-wrap; }
 .wiz-fb.ok { background: #e2f2e0; border-color: #2f7d33; color: #1d5a22; }
@@ -377,6 +431,7 @@ td .mono, td.mono { user-select: text; }
 </div>
 <div class="dropdown" id="dd-windows" hidden>
   <div class="dd-item" data-act="winvms">Virtual Machines</div>
+  <div class="dd-item" data-act="winchat" id="dd-chat-item" hidden>Chat</div>
   <div class="dd-item" data-act="winconfig">Configuration</div>
   <div class="dd-item" data-act="winlog">Daemon Log</div>
 </div>
@@ -389,6 +444,18 @@ td .mono, td.mono { user-select: text; }
 
 <div id="desktop">
   <div id="icons"></div>
+  <!-- speech balloon in the same pixel style as the Mac icons; hidden until
+       Ollama is detected, like the Windows → Chat menu item -->
+  <div class="dicon" id="chat-icon" title="Chat — double-click to talk to your VM cloud" hidden>
+    <svg width="34" height="34" viewBox="0 0 32 32" shape-rendering="crispEdges">
+      <rect x="3.5" y="5.5" width="25" height="15" fill="#DAD5CA" stroke="#000"/>
+      <rect x="4.5" y="6.5" width="23" height="2" fill="#EDEAE2"/>
+      <path d="M9.5 20.5 v6 l6 -6 z" fill="#DAD5CA" stroke="#000"/>
+      <rect x="8" y="10" width="17" height="2" fill="#55524B"/>
+      <rect x="8" y="14" width="11" height="2" fill="#55524B"/>
+    </svg>
+    <span class="lbl">Chat</span>
+  </div>
   <div class="dicon" id="trash-icon">
     <svg width="34" height="34" viewBox="0 0 32 32" shape-rendering="crispEdges"><rect x="13.5" y="2.5" width="5" height="2" fill="#C8C3B8" stroke="#000"/><rect x="8.5" y="4.5" width="15" height="3" fill="#D5D0C5" stroke="#000"/><rect x="9.5" y="7.5" width="13" height="21" fill="#CDC8BD" stroke="#000"/><path d="M12.5 10v16M15.5 10v16M18.5 10v16M21.5 10v16" stroke="#8B867B"/></svg>
     <span class="lbl">Trash</span>
@@ -532,6 +599,31 @@ td .mono, td.mono { user-select: text; }
         <path fill="#777" d="M10 5h1v1h-1zM9 6h1v1H9zM8 7h1v1H8zM7 8h1v1H7zM6 9h1v1H6zM5 10h1v1H5zM12 7h1v1h-1zM11 8h1v1h-1zM10 9h1v1h-1zM9 10h1v1H9zM8 11h1v1H8zM7 12h1v1H7zM14 9h1v1h-1zM13 10h1v1h-1zM12 11h1v1h-1zM11 12h1v1h-1zM10 13h1v1h-1zM9 14h1v1H9z"/>
         <path fill="#aaa" d="M4 10h1v1H4zM6 12h1v1H6zM8 14h1v1H8z"/>
       </svg>
+    </div>
+  </div>
+
+  <!-- Chat -->
+  <div class="window" id="win-chat" style="left:90px; top:44px; width:820px;" hidden>
+    <div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
+      <div class="title">Chat</div>
+      <div class="stripe"></div><button class="tbox zoom"></button><button class="tbox shade"></button></div>
+    <div class="win-frame">
+      <div class="win-body" style="padding:10px">
+        <div class="chat-wrap">
+          <div class="chat-side">
+            <button class="ghost" id="chat-new">New Chat</button>
+            <div class="listbox chat-sessions" id="chat-sessions"></div>
+          </div>
+          <div class="chat-main">
+            <div class="chat-msgs" id="chat-msgs"></div>
+            <div class="chat-inrow">
+              <textarea id="chat-input" rows="2" placeholder="Ask for anything — e.g. create a vm named blog and serve a hello page from it"></textarea>
+              <button class="btn" id="chat-send">Send</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="statusbar"><span id="chat-status">…</span></div>
     </div>
   </div>
 
@@ -812,6 +904,7 @@ const ACTIONS = {
   closewin: closeFrontWindow,
   refresh: () => { loadVMs().then(() => toast("Refreshed")).catch(e => toast(e.message)); },
   winvms: () => openWin("#win-vms"),
+  winchat: () => openChatWin(),
   winconfig: openConfigWin,
   winlog: openLogWin,
   cfstatus: () => sumOpen(),
@@ -871,6 +964,10 @@ const trashIcon = $("#trash-icon");
 trashIcon.addEventListener("click", e => { e.stopPropagation(); trashIcon.classList.add("sel"); selectedIcon = null; });
 trashIcon.addEventListener("dblclick", () => openWin("#win-trash"));
 document.addEventListener("mousedown", e => { if (!e.target.closest("#trash-icon")) trashIcon.classList.remove("sel"); });
+const chatIcon = $("#chat-icon");
+chatIcon.addEventListener("click", e => { e.stopPropagation(); chatIcon.classList.add("sel"); selectedIcon = null; });
+chatIcon.addEventListener("dblclick", () => openChatWin());
+document.addEventListener("mousedown", e => { if (!e.target.closest("#chat-icon")) chatIcon.classList.remove("sel"); });
 
 // ---- vm list ----
 let currentVM = null;
@@ -1320,6 +1417,183 @@ async function loadTranscripts() {
   }
 }
 
+// ---- chat ----
+let chatCur = null, chatBusy = false;
+const chatMsgs = $("#chat-msgs"), chatInput = $("#chat-input");
+
+// the Chat window only appears once the Ollama endpoint answers /api/version
+async function chatDetect(force) {
+  try {
+    const st = await j("/v1/chat/status" + (force ? "?force=1" : ""));
+    $("#dd-chat-item").hidden = !st.detected;
+    $("#chat-icon").hidden = !st.detected;
+    $("#chat-status").textContent = st.detected
+      ? "ollama " + st.version + " — " + (st.model || "no model set") + " — " + st.base_url
+      : (st.reason || "ollama not detected");
+    if (!st.detected && !$("#win-chat").hidden) toast("Ollama went away: " + (st.reason || ""));
+  } catch (e) { /* daemon unreachable; leave as-is */ }
+}
+function openChatWin() {
+  openWin("#win-chat");
+  if (!chatMsgs.children.length) chatHint();
+  loadChatSessions().catch(e => toast(e.message));
+  chatInput.focus();
+}
+function chatHint() {
+  chatMsgs.replaceChildren(el("div", { class: "chat-hint" },
+    "This chat can operate exe for you: create and manage VMs, run commands inside them, build things, and publish ports to the web.",
+    el("br"), el("br"), "Try: “what's running right now?”"));
+}
+function chatStick(force) {
+  // during streaming only follow the bottom if the user hasn't scrolled up
+  if (force || chatMsgs.scrollHeight - chatMsgs.scrollTop - chatMsgs.clientHeight < 40)
+    chatMsgs.scrollTop = chatMsgs.scrollHeight;
+}
+function addMsg(cls, text) {
+  const d = el("div", { class: "msg " + cls }, text);
+  chatMsgs.append(d);
+  chatStick(true);
+  return d;
+}
+// assistant markdown: marked parses, DOMPurify strips anything dangerous
+marked.use({ gfm: true, breaks: true });
+DOMPurify.addHook("afterSanitizeAttributes", n => {
+  if (n.tagName === "A") { n.setAttribute("target", "_blank"); n.setAttribute("rel", "noopener"); }
+});
+function renderMD(node, text) {
+  node.innerHTML = DOMPurify.sanitize(marked.parse(text));
+}
+function addMDMsg(text) {
+  const d = addMsg("asst", "");
+  renderMD(d, text);
+  chatStick(true);
+  return d;
+}
+function addToolOut(out) {
+  if (out && out.trim()) addMsg("tool-out", out.length > 4000 ? out.slice(0, 4000) + "…" : out);
+}
+// mirrors the server's chatToolSummary for replaying stored sessions
+function toolSummary(name, rawArgs) {
+  let a = rawArgs || {};
+  if (typeof a === "string") { try { a = JSON.parse(a); } catch (e) { a = {}; } }
+  switch (name) {
+    case "bash": return (a.vm || "") + " $ " + (a.command || "");
+    case "write_file": return `write ${a.vm}:${a.path} (${(a.content || "").length} bytes)`;
+    case "read_file": return `read ${a.vm}:${a.path}`;
+    case "expose": return `expose ${a.vm}:${a.port}` + (a.subdomain ? ` as "${a.subdomain}"` : "");
+    default: return name + (Object.keys(a).length ? " " + JSON.stringify(a) : "");
+  }
+}
+function renderChatSession(sess) {
+  chatMsgs.replaceChildren();
+  for (const m of sess.messages || []) {
+    if (m.role === "user") addMsg("user", m.content);
+    else if (m.role === "assistant") {
+      if ((m.content || "").trim()) addMDMsg(m.content.trim());
+      for (const tc of m.tool_calls || []) addMsg("tool", "▸ " + toolSummary(tc.function.name, tc.function.arguments));
+    } else if (m.role === "tool") addToolOut(m.content || "");
+  }
+  if (!chatMsgs.children.length) chatHint();
+}
+async function loadChatSessions() {
+  const list = await j("/v1/chat/sessions");
+  const box = $("#chat-sessions");
+  box.replaceChildren();
+  if (!list.length) box.append(el("div", { class: "muted", style: "padding:8px" }, "No chats yet."));
+  for (const m of list) {
+    const x = el("button", { class: "ghost sm danger", title: "Delete this chat" }, "×");
+    x.onclick = async e => {
+      e.stopPropagation();
+      if (!x.classList.contains("armed")) {
+        x.classList.add("armed");
+        setTimeout(() => x.classList.remove("armed"), 3000);
+        return;
+      }
+      try { await api("/v1/chat/sessions/" + m.id, { method: "DELETE" }); } catch (err) { toast(err.message); }
+      if (chatCur === m.id) { chatCur = null; chatHint(); }
+      loadChatSessions().catch(() => {});
+    };
+    const item = el("div", { class: "cs-item" + (m.id === chatCur ? " sel" : "") },
+      el("div", { style: "flex:1; min-width:0" },
+        el("div", { class: "cs-title", title: m.title }, m.title),
+        el("div", { class: "cs-time" }, fmtTime(m.updated_at))),
+      x);
+    item.onclick = e => { if (!e.target.closest("button")) selectChat(m.id); };
+    box.append(item);
+  }
+}
+async function selectChat(id) {
+  if (chatBusy) { toast("Wait for the current reply to finish."); return; }
+  chatCur = id;
+  try { renderChatSession(await j("/v1/chat/sessions/" + id)); } catch (e) { toast(e.message); }
+  loadChatSessions().catch(() => {});
+  chatInput.focus();
+}
+$("#chat-new").onclick = () => {
+  if (chatBusy) { toast("Wait for the current reply to finish."); return; }
+  chatCur = null;
+  chatHint();
+  loadChatSessions().catch(() => {});
+  chatInput.focus();
+};
+async function chatSend() {
+  const text = chatInput.value.trim();
+  if (!text || chatBusy) return;
+  chatBusy = true;
+  $("#chat-send").disabled = true;
+  const hint = chatMsgs.querySelector(".chat-hint");
+  if (hint) hint.remove();
+  addMsg("user", text);
+  chatInput.value = "";
+  const think = addMsg("think", "working");
+  let cur = null, curText = "";
+  const handle = ev => {
+    if (ev.type === "delta") {
+      // grow the streaming assistant bubble in place, re-rendering markdown
+      if (!cur) { cur = el("div", { class: "msg asst" }); think.before(cur); curText = ""; }
+      curText += ev.text;
+      renderMD(cur, curText);
+      chatStick();
+      return;
+    }
+    cur = null;
+    think.remove();
+    if (ev.type === "session") chatCur = ev.meta.id;
+    else if (ev.type === "text") addMDMsg(ev.text);
+    else if (ev.type === "tool_call") addMsg("tool", "▸ " + ev.summary);
+    else if (ev.type === "tool_result") addToolOut(ev.output || "");
+    else if (ev.type === "error") addMsg("err", ev.error);
+    if (ev.type !== "done") { chatMsgs.append(think); chatStick(); }
+  };
+  try {
+    const resp = await api("/v1/chat/send", { method: "POST", json: { session: chatCur || "", message: text } });
+    const rd = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await rd.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (line) handle(JSON.parse(line));
+      }
+    }
+  } catch (e) { addMsg("err", e.message); }
+  think.remove();
+  chatBusy = false;
+  $("#chat-send").disabled = false;
+  loadChatSessions().catch(() => {});
+  loadVMs().catch(() => {});
+  chatInput.focus();
+}
+$("#chat-send").onclick = chatSend;
+chatInput.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); chatSend(); }
+});
+
 // ---- config ----
 const CONFIG_FIELDS = [
   { group: "Daemon", fields: [
@@ -1453,6 +1727,7 @@ async function daemonRestart(btn) {
     loadVMs().catch(() => {});
     loadConfig().catch(() => {});
     cfHeartbeat(true);
+    chatDetect(true);
   } else {
     toast("Daemon didn't come back within 30s — check `exe serve` in the terminal.");
     btn.disabled = false;
@@ -1486,6 +1761,7 @@ $("#cfg-save").onclick = async () => {
     if (res.ingress_warning) msg += " — " + res.ingress_warning;
     $("#cfg-status").textContent = msg;
     toast(msg);
+    chatDetect(true);
   } catch (e) { toast(e.message); }
   $("#cfg-save").disabled = false;
 };
@@ -1715,6 +1991,7 @@ renderVMHead();
 loadVMs().catch(e => toast(e.message));
 loadConfig().catch(() => {});
 cfHeartbeat(false);
+chatDetect(false);
 setInterval(() => { if (!document.hidden) loadVMs().catch(() => {}); }, 5000);
 </script>
 </body>

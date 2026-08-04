@@ -51,6 +51,14 @@ type Server struct {
 	cfHealthAt  time.Time
 	cfHealthKey string
 	cfHealthRes map[string]any
+
+	// Cached Ollama detection for the Chat window, plus one lock per chat
+	// session so two sends can't interleave a session's history.
+	chatStatMu  sync.Mutex
+	chatStatAt  time.Time
+	chatStatKey string
+	chatStatRes map[string]any
+	chatLocks   sync.Map // session id -> *sync.Mutex
 }
 
 func New(cfg *config.Config, vms vmm.Manager, px *proxy.Proxy, keyPath, stateDir string) *Server {
@@ -77,6 +85,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/vms/{name}/terminal", s.handleTerminal)
 	mux.HandleFunc("GET /v1/vms/{name}/transcripts", s.handleTranscripts)
 	mux.HandleFunc("GET /v1/vms/{name}/transcripts/{id}", s.handleTranscript)
+	mux.HandleFunc("GET /v1/chat/status", s.handleChatStatus)
+	mux.HandleFunc("GET /v1/chat/sessions", s.handleChatSessions)
+	mux.HandleFunc("GET /v1/chat/sessions/{id}", s.handleChatSession)
+	mux.HandleFunc("DELETE /v1/chat/sessions/{id}", s.handleChatSessionDelete)
+	mux.HandleFunc("POST /v1/chat/send", s.handleChatSend)
 	mux.HandleFunc("POST /v1/cloudflare/wizard", s.handleCFWizard)
 	mux.HandleFunc("GET /v1/cloudflare/health", s.handleCFHealth)
 	mux.HandleFunc("GET /v1/config", s.handleConfigGet)

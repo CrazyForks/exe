@@ -5,6 +5,7 @@ import (
 	"embed"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"exe/internal/config"
 	"exe/internal/sshexec"
 	"exe/internal/transcript"
+	"exe/internal/vmm"
 )
 
 //go:embed ui/index.html
@@ -45,28 +47,24 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 
 var ssProcessRE = regexp.MustCompile(`users:\(\("([^"]+)"`)
 
-// handlePorts lists TCP ports listening on non-loopback addresses inside the
-// VM (SSH excluded) so the UI can offer one-click links to running services.
-func (s *Server) handlePorts(w http.ResponseWriter, r *http.Request) {
+type vmPort struct {
+	Port    int    `json:"port"`
+	Process string `json:"process,omitempty"`
+}
+
+// scanPorts lists TCP ports listening on non-loopback addresses inside the
+// VM (SSH excluded); shared by the Services tab and the chat agent.
+func (s *Server) scanPorts(ctx context.Context, info *vmm.Info) ([]vmPort, error) {
 	cfg := s.Config()
-	name := r.PathValue("name")
-	info, err := s.runningVM(r.Context(), name)
-	if err != nil {
-		writeErr(w, http.StatusConflict, err)
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	target := sshexec.Target{Host: info.IP, User: cfg.SSHUser, KeyPath: s.KeyPath}
 	out, code, err := target.Run(ctx, `sudo -n ss -tlnp 2>/dev/null || ss -tln`, 65536)
-	if err != nil || code != 0 {
-		writeErr(w, http.StatusBadGateway, err)
-		return
+	if err != nil {
+		return nil, err
 	}
-
-	type svc struct {
-		Port    int    `json:"port"`
-		Process string `json:"process,omitempty"`
+	if code != 0 {
+		return nil, fmt.Errorf("ss exited %d: %s", code, out)
 	}
 	seen := map[int]string{}
 	for _, line := range strings.Split(out, "\n") {
@@ -102,11 +100,25 @@ func (s *Server) handlePorts(w http.ResponseWriter, r *http.Request) {
 			seen[port] = proc
 		}
 	}
-	services := []svc{}
+	services := []vmPort{}
 	for port, proc := range seen {
-		services = append(services, svc{Port: port, Process: proc})
+		services = append(services, vmPort{Port: port, Process: proc})
 	}
 	sort.Slice(services, func(i, j int) bool { return services[i].Port < services[j].Port })
+	return services, nil
+}
+
+func (s *Server) handlePorts(w http.ResponseWriter, r *http.Request) {
+	info, err := s.runningVM(r.Context(), r.PathValue("name"))
+	if err != nil {
+		writeErr(w, http.StatusConflict, err)
+		return
+	}
+	services, err := s.scanPorts(r.Context(), info)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ip": info.IP, "ports": services})
 }
 
