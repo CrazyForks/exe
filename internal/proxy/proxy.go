@@ -1,0 +1,103 @@
+// Package proxy is a hostname-routed HTTP reverse proxy: the Cloudflare
+// tunnel forwards every hostname here, and each Host header maps to a VM
+// backend URL. Routes persist across daemon restarts.
+package proxy
+
+import (
+	"encoding/json"
+	"net"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"strings"
+	"sync"
+)
+
+type Proxy struct {
+	mu     sync.RWMutex
+	file   string
+	routes map[string]string // lowercase host (no port) -> backend URL
+}
+
+func New(file string) (*Proxy, error) {
+	p := &Proxy{file: file, routes: map[string]string{}}
+	b, err := os.ReadFile(file)
+	if err == nil {
+		if err := json.Unmarshal(b, &p.routes); err != nil {
+			return nil, err
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	return p, nil
+}
+
+func (p *Proxy) save() error {
+	b, _ := json.MarshalIndent(p.routes, "", "  ")
+	return os.WriteFile(p.file, append(b, '\n'), 0o644)
+}
+
+func (p *Proxy) Set(host, backend string) error {
+	if _, err := url.Parse(backend); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.routes[strings.ToLower(host)] = backend
+	return p.save()
+}
+
+func (p *Proxy) Remove(host string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.routes, strings.ToLower(host))
+	return p.save()
+}
+
+func (p *Proxy) Snapshot() map[string]string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	out := make(map[string]string, len(p.routes))
+	for k, v := range p.routes {
+		out[k] = v
+	}
+	return out
+}
+
+func (p *Proxy) lookup(hostHeader string) (string, bool) {
+	h := hostHeader
+	if host, _, err := net.SplitHostPort(hostHeader); err == nil {
+		h = host
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	b, ok := p.routes[strings.ToLower(h)]
+	return b, ok
+}
+
+func (p *Proxy) Handler() http.Handler {
+	rp := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			backend, ok := p.lookup(pr.In.Host)
+			if !ok {
+				return
+			}
+			u, err := url.Parse(backend)
+			if err != nil {
+				return
+			}
+			pr.SetURL(u)
+			pr.SetXForwarded()
+			// Keep the public hostname so apps see the real Host.
+			pr.Out.Host = pr.In.Host
+		},
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := p.lookup(r.Host); !ok {
+			http.Error(w, "exe proxy: no route for host "+r.Host, http.StatusBadGateway)
+			return
+		}
+		rp.ServeHTTP(w, r)
+	})
+}

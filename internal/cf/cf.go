@@ -1,0 +1,153 @@
+// Package cf talks to the Cloudflare v4 API to publish VM services through a
+// remotely-managed Cloudflare Tunnel: a CNAME per hostname plus a tunnel
+// ingress rule pointing back at this machine's reverse proxy.
+package cf
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+const apiBase = "https://api.cloudflare.com/client/v4"
+
+type Client struct {
+	Token     string
+	AccountID string
+	ZoneID    string
+	TunnelID  string
+	Domain    string
+	HTTPC     *http.Client
+}
+
+func (c *Client) Configured() bool {
+	return c.Token != "" && c.AccountID != "" && c.ZoneID != "" && c.TunnelID != "" && c.Domain != ""
+}
+
+func (c *Client) httpc() *http.Client {
+	if c.HTTPC != nil {
+		return c.HTTPC
+	}
+	return &http.Client{Timeout: 30 * time.Second}
+}
+
+type apiEnvelope struct {
+	Success bool `json:"success"`
+	Errors  []struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"errors"`
+	Result json.RawMessage `json:"result"`
+}
+
+func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	var rd io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		rd = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, apiBase+path, rd)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpc().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var env apiEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return fmt.Errorf("cloudflare %s %s: HTTP %d: %.500s", method, path, resp.StatusCode, raw)
+	}
+	if !env.Success {
+		var msgs []string
+		for _, e := range env.Errors {
+			msgs = append(msgs, fmt.Sprintf("%d: %s", e.Code, e.Message))
+		}
+		return fmt.Errorf("cloudflare %s %s failed: %s", method, path, strings.Join(msgs, "; "))
+	}
+	if out != nil && len(env.Result) > 0 {
+		return json.Unmarshal(env.Result, out)
+	}
+	return nil
+}
+
+// EnsureDNS upserts a proxied CNAME fqdn -> <tunnel>.cfargotunnel.com.
+func (c *Client) EnsureDNS(ctx context.Context, fqdn string) error {
+	content := c.TunnelID + ".cfargotunnel.com"
+	q := url.Values{"type": {"CNAME"}, "name": {fqdn}}
+	var existing []struct {
+		ID string `json:"id"`
+	}
+	if err := c.do(ctx, "GET", "/zones/"+c.ZoneID+"/dns_records?"+q.Encode(), nil, &existing); err != nil {
+		return err
+	}
+	rec := map[string]any{"type": "CNAME", "name": fqdn, "content": content, "proxied": true, "ttl": 1}
+	if len(existing) > 0 {
+		return c.do(ctx, "PUT", "/zones/"+c.ZoneID+"/dns_records/"+existing[0].ID, rec, nil)
+	}
+	return c.do(ctx, "POST", "/zones/"+c.ZoneID+"/dns_records", rec, nil)
+}
+
+// EnsureIngress upserts an ingress rule hostname->service in the tunnel's
+// remotely-managed configuration, preserving other rules and keeping a
+// catch-all rule last. Locally-managed tunnels (config.yml on the
+// cloudflared host) cannot be configured this way.
+func (c *Client) EnsureIngress(ctx context.Context, fqdn, service string) error {
+	var got struct {
+		Config map[string]any `json:"config"`
+	}
+	path := "/accounts/" + c.AccountID + "/cfd_tunnel/" + c.TunnelID + "/configurations"
+	if err := c.do(ctx, "GET", path, nil, &got); err != nil {
+		return err
+	}
+	cfg := got.Config
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
+	var rules []any
+	if r, ok := cfg["ingress"].([]any); ok {
+		rules = r
+	}
+
+	updated := false
+	for i, r := range rules {
+		m, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		if h, _ := m["hostname"].(string); h == fqdn {
+			m["service"] = service
+			rules[i] = m
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		newRule := map[string]any{"hostname": fqdn, "service": service}
+		catchAll := map[string]any{"service": "http_status:404"}
+		if n := len(rules); n > 0 {
+			if m, ok := rules[n-1].(map[string]any); ok {
+				if h, _ := m["hostname"].(string); h == "" {
+					catchAll = m
+					rules = rules[:n-1]
+				}
+			}
+		}
+		rules = append(rules, newRule, catchAll)
+	}
+	cfg["ingress"] = rules
+	return c.do(ctx, "PUT", path, map[string]any{"config": cfg}, nil)
+}

@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>exe — personal cloud</title>
+<link rel="stylesheet" href="/ui/vendor/xterm.css">
+<script src="/ui/vendor/xterm.js"></script>
+<script src="/ui/vendor/xterm-addon-fit.js"></script>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #1a1d21; --muted: #6b7280;
+  --border: #e2e5ea; --accent: #2563eb; --accent-text: #ffffff;
+  --green: #16a34a; --red: #dc2626; --amber: #d97706;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115; --panel: #171a21; --text: #e5e7eb; --muted: #9ca3af;
+    --border: #262b36; --accent: #3b82f6;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; gap: 16px; padding: 12px 20px;
+  border-bottom: 1px solid var(--border); background: var(--panel);
+  position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+.brand { font-weight: 700; font-size: 18px; }
+.brand .sub { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 6px; }
+nav { display: flex; gap: 4px; }
+nav button { background: none; border: none; color: var(--muted); padding: 6px 12px;
+  border-radius: 8px; font-size: 14px; cursor: pointer; }
+nav button.active { background: var(--bg); color: var(--text); font-weight: 600; }
+#token { margin-left: auto; width: 150px; }
+main { max-width: 980px; margin: 0 auto; padding: 20px; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px; margin-bottom: 16px; }
+.card h3 { margin: 0 0 10px; font-size: 14px; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--muted); }
+input, textarea, select { background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px;
+  font-size: 14px; font-family: inherit; }
+input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+textarea { width: 100%; min-height: 70px; resize: vertical; font-family: var(--mono); font-size: 13px; }
+button.btn { background: var(--accent); color: var(--accent-text); border: none;
+  border-radius: 8px; padding: 8px 14px; font-size: 14px; cursor: pointer; font-weight: 500; }
+button.btn:disabled { opacity: .5; cursor: default; }
+button.ghost { background: none; border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: 5px 10px; font-size: 13px; cursor: pointer; }
+button.ghost.danger { color: var(--red); }
+button.ghost.armed { background: var(--red); border-color: var(--red); color: #fff; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--border); }
+td { padding: 10px; border-bottom: 1px solid var(--border); }
+tr.vm-row { cursor: pointer; }
+tr.vm-row:hover td { background: var(--bg); }
+tr:last-child td { border-bottom: none; }
+.chip { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.chip.running, .chip.done { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
+.chip.stopped { background: color-mix(in srgb, var(--muted) 15%, transparent); color: var(--muted); }
+.chip.error, .chip.interrupted { background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red); }
+.chip.starting, .chip.stopping { background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); }
+pre.out { background: #0b0d12; color: #d1e3d1; border-radius: 8px; padding: 12px;
+  font-family: var(--mono); font-size: 12.5px; max-height: 420px; overflow: auto;
+  white-space: pre-wrap; word-break: break-word; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.muted { color: var(--muted); font-size: 13px; }
+.mono { font-family: var(--mono); font-size: 13px; }
+.t-item { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+  margin-bottom: 6px; cursor: pointer; display: flex; gap: 10px; align-items: baseline; }
+.t-item:hover { background: var(--bg); }
+.t-item.sel { border-color: var(--accent); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.svc-item { display: flex; gap: 12px; align-items: baseline; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; }
+#term-box { height: 400px; background: #000; border-radius: 8px; padding: 6px 0 6px 6px; }
+#term-box .xterm { height: 100%; }
+.t-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.field label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 3px; }
+.field input { width: 100%; }
+.field .hint { font-size: 11.5px; color: var(--amber); }
+#status-bar { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+  background: var(--text); color: var(--bg); border-radius: 8px; padding: 8px 16px;
+  font-size: 13.5px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
+#status-bar.show { opacity: .95; }
+h2 { margin: 4px 0 12px; }
+@media (max-width: 640px) { td:nth-child(3), th:nth-child(3) { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">exe<span class="sub">personal cloud</span></div>
+  <nav>
+    <button id="nav-vms" class="active">VMs</button>
+    <button id="nav-config">Config</button>
+  </nav>
+  <input id="token" type="password" placeholder="API token" title="Only needed if api_token is set">
+</header>
+
+<main>
+<section id="tab-vms">
+  <div id="vm-list-view">
+    <div class="card">
+      <h3>New VM</h3>
+      <div class="row" style="align-items:flex-end">
+        <div class="field" style="width:150px">
+          <label for="c-name">Name</label>
+          <input id="c-name" placeholder="my-vm">
+        </div>
+        <div class="field" style="width:80px">
+          <label for="c-cpus">CPUs</label>
+          <input id="c-cpus" type="number" placeholder="2">
+        </div>
+        <div class="field" style="width:110px">
+          <label for="c-mem">Memory (MB)</label>
+          <input id="c-mem" type="number" placeholder="2048">
+        </div>
+        <div class="field" style="width:100px">
+          <label for="c-disk">Disk (GB)</label>
+          <input id="c-disk" type="number" placeholder="20">
+        </div>
+        <button class="btn" id="c-go">Create</button>
+        <span class="muted" id="c-status"></span>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Virtual machines</h3>
+      <table>
+        <thead><tr><th>Name</th><th>State</th><th>Specs</th><th>IP</th><th></th></tr></thead>
+        <tbody id="vm-rows"></tbody>
+      </table>
+      <div class="muted" id="vm-empty" hidden>No VMs yet — create one above.</div>
+    </div>
+  </div>
+
+  <div id="vm-detail" hidden>
+    <div class="row">
+      <button class="ghost" id="back">&larr; all VMs</button>
+      <h2 id="d-name" style="margin:0"></h2>
+      <span class="chip" id="d-state"></span>
+      <span class="mono muted" id="d-ip"></span>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h3 style="margin:0">Web services</h3>
+        <button class="ghost" id="svc-refresh">Refresh</button>
+      </div>
+      <div id="svc-list" style="margin-top:8px"><span class="muted">…</span></div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h3 style="margin:0">Terminal</h3>
+        <div>
+          <button class="ghost" id="term-open">Connect</button>
+          <button class="ghost" id="term-close" hidden>Disconnect</button>
+        </div>
+      </div>
+      <div id="term-box" style="margin-top:8px" hidden></div>
+    </div>
+
+    <div class="card">
+      <h3>Vibe code</h3>
+      <textarea id="a-prompt" placeholder="Build me a…"></textarea>
+      <div class="row" style="margin-top:8px; align-items:flex-end">
+        <div class="field" style="width:220px">
+          <label for="a-model">Model (blank = default)</label>
+          <input id="a-model">
+        </div>
+        <button class="btn" id="a-run">Run agent</button>
+      </div>
+      <pre class="out" id="a-out" hidden></pre>
+    </div>
+
+    <div class="card">
+      <h3>Expose</h3>
+      <div class="row" style="align-items:flex-end">
+        <div class="field" style="width:110px">
+          <label for="e-port">VM port</label>
+          <input id="e-port" type="number" placeholder="8000">
+        </div>
+        <div class="field" style="width:230px">
+          <label for="e-sub">Subdomain (blank = VM name)</label>
+          <input id="e-sub">
+        </div>
+        <button class="btn" id="e-go">Expose</button>
+      </div>
+      <div id="e-result" class="mono muted"></div>
+    </div>
+
+    <div class="card">
+      <h3>Vibe code transcripts</h3>
+      <div id="t-list"><span class="muted">None yet.</span></div>
+      <pre class="out" id="t-log" hidden></pre>
+    </div>
+  </div>
+</section>
+
+<section id="tab-config" hidden>
+  <div class="card">
+    <h3>Configuration <span class="muted" style="text-transform:none">(~/.exe/config.json — fields marked &#42; need a daemon restart)</span></h3>
+    <div id="cfg-form"></div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn" id="cfg-save">Save</button>
+      <span class="muted" id="cfg-status"></span>
+    </div>
+  </div>
+</section>
+</main>
+
+<div id="status-bar"></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+function el(tag, attrs = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") n.className = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v);
+  }
+  for (const kid of kids) n.append(kid);
+  return n;
+}
+function toast(msg) {
+  const b = $("#status-bar");
+  b.textContent = msg;
+  b.classList.add("show");
+  clearTimeout(b._t);
+  b._t = setTimeout(() => b.classList.remove("show"), 3500);
+}
+const fmtTime = iso => new Date(iso).toLocaleString();
+
+// ---- api ----
+const tokenInput = $("#token");
+tokenInput.value = localStorage.getItem("exe_token") || "";
+tokenInput.addEventListener("change", () => localStorage.setItem("exe_token", tokenInput.value));
+async function api(path, opts = {}) {
+  opts.headers = Object.assign({}, opts.headers);
+  if (tokenInput.value) opts.headers["Authorization"] = "Bearer " + tokenInput.value;
+  if (opts.json !== undefined) {
+    opts.body = JSON.stringify(opts.json);
+    opts.headers["Content-Type"] = "application/json";
+    delete opts.json;
+  }
+  const r = await fetch(path, opts);
+  if (!r.ok) {
+    let m = "HTTP " + r.status;
+    try { const j = await r.json(); if (j.error) m = j.error; } catch (e) {}
+    throw new Error(m);
+  }
+  return r;
+}
+const j = (p, o) => api(p, o).then(r => r.json());
+
+// ---- tabs ----
+let activeTab = "vms";
+function showTab(t) {
+  activeTab = t;
+  $("#tab-vms").hidden = t !== "vms";
+  $("#tab-config").hidden = t !== "config";
+  $("#nav-vms").classList.toggle("active", t === "vms");
+  $("#nav-config").classList.toggle("active", t === "config");
+  if (t === "config") loadConfig().catch(e => toast(e.message));
+  if (t === "vms") loadVMs().catch(() => {});
+}
+$("#nav-vms").onclick = () => showTab("vms");
+$("#nav-config").onclick = () => showTab("config");
+
+// ---- vm list ----
+let currentVM = null;
+function chip(state) { return el("span", { class: "chip " + state }, state); }
+async function loadVMs() {
+  const vms = await j("/v1/vms");
+  const tb = $("#vm-rows");
+  tb.replaceChildren();
+  $("#vm-empty").hidden = vms.length > 0;
+  for (const vm of vms) {
+    const actions = el("td", {});
+    if (vm.state === "running") {
+      actions.append(el("button", { class: "ghost", onclick: e => { e.stopPropagation(); vmAction(vm.name, "stop"); } }, "Stop"));
+    } else {
+      actions.append(el("button", { class: "ghost", onclick: e => { e.stopPropagation(); vmAction(vm.name, "start"); } }, "Start"));
+    }
+    const del = el("button", { class: "ghost danger", style: "margin-left:6px" }, "Delete");
+    del.onclick = async e => {
+      e.stopPropagation();
+      if (!del.classList.contains("armed")) {
+        del.classList.add("armed");
+        del.textContent = "Sure?";
+        setTimeout(() => { del.classList.remove("armed"); del.textContent = "Delete"; }, 3000);
+        return;
+      }
+      try { await api("/v1/vms/" + vm.name, { method: "DELETE" }); toast(vm.name + " deleted"); loadVMs(); }
+      catch (err) { toast(err.message); }
+    };
+    actions.append(del);
+    tb.append(el("tr", { class: "vm-row", onclick: () => openVM(vm.name) },
+      el("td", { class: "mono" }, vm.name),
+      el("td", {}, chip(vm.state)),
+      el("td", { class: "muted" }, `${vm.cpus} cpu · ${vm.memory_mb} MB · ${vm.disk_gb} GB`),
+      el("td", { class: "mono" }, vm.ip || "—"),
+      actions));
+  }
+}
+async function vmAction(name, action) {
+  toast(name + ": " + action + "…");
+  try { await api(`/v1/vms/${name}/${action}`, { method: "POST", json: {} }); toast(name + " " + action + " ok"); }
+  catch (e) { toast(e.message); }
+  loadVMs();
+  if (currentVM === name) refreshDetailHead();
+}
+$("#c-go").onclick = async () => {
+  const name = $("#c-name").value.trim();
+  if (!name) { toast("name required"); return; }
+  const body = { name };
+  for (const [id, key] of [["#c-cpus", "cpus"], ["#c-mem", "memory_mb"], ["#c-disk", "disk_gb"]]) {
+    const v = parseInt($(id).value, 10);
+    if (v > 0) body[key] = v;
+  }
+  $("#c-go").disabled = true;
+  $("#c-status").textContent = "creating… (usually ~10s; first ever run downloads a 3 GB image)";
+  try {
+    await j("/v1/vms", { method: "POST", json: body });
+    $("#c-name").value = "";
+    toast(name + " is ready");
+  } catch (e) { toast(e.message); }
+  $("#c-go").disabled = false;
+  $("#c-status").textContent = "";
+  loadVMs();
+};
+
+// ---- vm detail ----
+$("#back").onclick = () => { closeTerm(); currentVM = null; $("#vm-detail").hidden = true; $("#vm-list-view").hidden = false; loadVMs(); };
+async function openVM(name) {
+  closeTerm();
+  currentVM = name;
+  $("#vm-list-view").hidden = true;
+  $("#vm-detail").hidden = false;
+  $("#d-name").textContent = name;
+  $("#a-out").hidden = true;
+  $("#t-log").hidden = true;
+  $("#e-result").textContent = "";
+  await refreshDetailHead();
+  loadPorts().catch(() => {});
+  loadTranscripts().catch(e => toast(e.message));
+}
+
+// ---- terminal ----
+let term = null, termWS = null, fitAddon = null;
+function closeTerm() {
+  window.removeEventListener("resize", termResize);
+  if (termWS) { termWS.onclose = null; try { termWS.close(); } catch (e) {} termWS = null; }
+  if (term) { term.dispose(); term = null; }
+  $("#term-box").hidden = true;
+  $("#term-close").hidden = true;
+  $("#term-open").hidden = false;
+}
+function termResize() {
+  if (fitAddon && term && termWS && termWS.readyState === 1) {
+    fitAddon.fit();
+    termWS.send(JSON.stringify({ resize: [term.cols, term.rows] }));
+  }
+}
+$("#term-close").onclick = closeTerm;
+$("#term-open").onclick = () => {
+  closeTerm();
+  const box = $("#term-box");
+  box.hidden = false;
+  term = new Terminal({
+    fontSize: 13, cursorBlink: true,
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    theme: { background: "#000000" },
+  });
+  fitAddon = new FitAddon.FitAddon();
+  term.loadAddon(fitAddon);
+  term.open(box);
+  fitAddon.fit();
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const tok = tokenInput.value ? "?token=" + encodeURIComponent(tokenInput.value) : "";
+  termWS = new WebSocket(`${proto}://${location.host}/v1/vms/${currentVM}/terminal${tok}`);
+  termWS.binaryType = "arraybuffer";
+  const enc = new TextEncoder();
+  termWS.onopen = () => {
+    termWS.send(JSON.stringify({ resize: [term.cols, term.rows] }));
+    term.focus();
+  };
+  termWS.onmessage = e => term.write(new Uint8Array(e.data));
+  termWS.onclose = () => {
+    if (term) term.write("\r\n\x1b[90m[disconnected]\x1b[0m\r\n");
+    $("#term-close").hidden = true;
+    $("#term-open").hidden = false;
+  };
+  term.onData(d => { if (termWS && termWS.readyState === 1) termWS.send(enc.encode(d)); });
+  window.addEventListener("resize", termResize);
+  $("#term-open").hidden = true;
+  $("#term-close").hidden = false;
+};
+
+// ---- web services ----
+$("#svc-refresh").onclick = () => loadPorts().catch(() => {});
+async function loadPorts() {
+  const box = $("#svc-list");
+  box.replaceChildren(el("span", { class: "muted" }, "scanning…"));
+  let d;
+  try {
+    d = await j(`/v1/vms/${currentVM}/ports`);
+  } catch (e) {
+    box.replaceChildren(el("span", { class: "muted" }, e.message));
+    return;
+  }
+  const routes = await j("/v1/routes").catch(() => ({}));
+  const items = [];
+  for (const p of d.ports) {
+    const url = `http://${d.ip}:${p.port}/`;
+    items.push(el("div", { class: "svc-item" },
+      el("span", { class: "mono" }, ":" + p.port),
+      el("span", { class: "muted" }, p.process || ""),
+      el("a", { href: url, target: "_blank", rel: "noopener", class: "mono", style: "margin-left:auto" }, url + " ↗")));
+  }
+  for (const [host, backend] of Object.entries(routes)) {
+    if (backend.startsWith(`http://${d.ip}:`)) {
+      items.push(el("div", { class: "svc-item" },
+        el("span", { class: "chip running" }, "published"),
+        el("a", { href: "https://" + host, target: "_blank", rel: "noopener", class: "mono" }, "https://" + host + " ↗"),
+        el("span", { class: "muted mono", style: "margin-left:auto" }, "→ " + backend)));
+    }
+  }
+  box.replaceChildren();
+  if (!items.length) {
+    box.append(el("span", { class: "muted" }, "Nothing listening besides SSH. Vibe code something below, then hit Refresh."));
+  } else {
+    box.append(...items);
+  }
+}
+async function refreshDetailHead() {
+  try {
+    const vm = await j("/v1/vms/" + currentVM);
+    const st = $("#d-state");
+    st.className = "chip " + vm.state;
+    st.textContent = vm.state;
+    $("#d-ip").textContent = vm.ip || "";
+  } catch (e) { toast(e.message); }
+}
+
+// ---- agent ----
+$("#a-run").onclick = async () => {
+  const prompt = $("#a-prompt").value.trim();
+  if (!prompt) { toast("prompt required"); return; }
+  const out = $("#a-out");
+  out.hidden = false;
+  out.textContent = "";
+  $("#a-run").disabled = true;
+  try {
+    const resp = await api(`/v1/vms/${currentVM}/agent`, { method: "POST", json: { prompt, model: $("#a-model").value.trim() } });
+    const rd = resp.body.getReader();
+    const dec = new TextDecoder();
+    for (;;) {
+      const { done, value } = await rd.read();
+      if (done) break;
+      out.textContent += dec.decode(value, { stream: true });
+      out.scrollTop = out.scrollHeight;
+    }
+  } catch (e) { out.textContent += "\nERROR: " + e.message; }
+  $("#a-run").disabled = false;
+  loadTranscripts().catch(() => {});
+  loadPorts().catch(() => {});
+};
+
+// ---- expose ----
+$("#e-go").onclick = async () => {
+  const port = parseInt($("#e-port").value, 10);
+  if (!port) { toast("port required"); return; }
+  $("#e-go").disabled = true;
+  try {
+    const res = await j(`/v1/vms/${currentVM}/expose`, { method: "POST", json: { port, subdomain: $("#e-sub").value.trim() } });
+    const lines = [`route: ${res.host} → ${res.backend}`];
+    if (res.ingress) lines.push("tunnel ingress → " + res.ingress);
+    for (const wmsg of res.warnings || []) lines.push("⚠ " + wmsg);
+    lines.push("url: " + res.url);
+    $("#e-result").textContent = lines.join("\n");
+    $("#e-result").style.whiteSpace = "pre-wrap";
+  } catch (e) { toast(e.message); }
+  $("#e-go").disabled = false;
+};
+
+// ---- transcripts ----
+async function loadTranscripts() {
+  const list = await j(`/v1/vms/${currentVM}/transcripts`);
+  const box = $("#t-list");
+  box.replaceChildren();
+  if (!list.length) {
+    box.append(el("span", { class: "muted" }, "None yet."));
+    return;
+  }
+  for (const t of list) {
+    const item = el("div", { class: "t-item" },
+      el("span", { class: "muted mono", style: "font-size:12px" }, fmtTime(t.started_at)),
+      chip(t.status),
+      el("span", { class: "t-prompt", title: t.prompt }, t.prompt));
+    item.onclick = async () => {
+      for (const n of box.children) n.classList.remove("sel");
+      item.classList.add("sel");
+      try {
+        const d = await j(`/v1/vms/${currentVM}/transcripts/${t.id}`);
+        const log = $("#t-log");
+        log.hidden = false;
+        log.textContent = `# ${d.meta.model} · ${fmtTime(d.meta.started_at)} · ${d.meta.status}` +
+          (d.meta.error ? " — " + d.meta.error : "") + "\n# " + d.meta.prompt + "\n\n" + d.log;
+      } catch (e) { toast(e.message); }
+    };
+    box.append(item);
+  }
+}
+
+// ---- config ----
+const CONFIG_FIELDS = [
+  { group: "Daemon", fields: [
+    { path: "listen", restart: true, hint: "bind Tailscale IP for remote access" },
+    { path: "proxy_listen", restart: true },
+    { path: "advertise_host", hint: "this Mac as seen from the cloudflared host" },
+    { path: "api_token", secret: true },
+    { path: "ssh_user", restart: true },
+    { path: "image_url", restart: true },
+  ]},
+  { group: "VM defaults", fields: [
+    { path: "default_cpus", num: true },
+    { path: "default_memory_mb", num: true },
+    { path: "default_disk_gb", num: true },
+  ]},
+  { group: "Ollama", fields: [
+    { path: "ollama.base_url", hint: "local daemon or https://ollama.com" },
+    { path: "ollama.api_key", secret: true },
+    { path: "ollama.model" },
+  ]},
+  { group: "Cloudflare", fields: [
+    { path: "cloudflare.api_token", secret: true },
+    { path: "cloudflare.account_id" },
+    { path: "cloudflare.zone_id" },
+    { path: "cloudflare.tunnel_id" },
+    { path: "cloudflare.domain" },
+  ]},
+];
+const getPath = (o, p) => p.split(".").reduce((a, k) => (a == null ? a : a[k]), o);
+const setPath = (o, p, v) => { const ks = p.split("."); const last = ks.pop(); let t = o; for (const k of ks) { t[k] = t[k] || {}; t = t[k]; } t[last] = v; };
+let loadedConfig = null;
+async function loadConfig() {
+  loadedConfig = await j("/v1/config");
+  const form = $("#cfg-form");
+  form.replaceChildren();
+  for (const g of CONFIG_FIELDS) {
+    form.append(el("h3", { style: "margin-top:14px" }, g.group));
+    const grid = el("div", { class: "grid" });
+    for (const f of g.fields) {
+      const val = getPath(loadedConfig, f.path);
+      const input = el("input", {
+        id: "cfg-" + f.path,
+        type: f.secret ? "password" : (f.num ? "number" : "text"),
+        value: val == null ? "" : String(val),
+      });
+      const field = el("div", { class: "field" },
+        el("label", { for: "cfg-" + f.path }, f.path + (f.restart ? " *" : "")), input);
+      if (f.hint) field.append(el("div", { class: "hint" }, f.hint));
+      grid.append(field);
+    }
+    form.append(grid);
+  }
+  // populate placeholders elsewhere in the UI
+  $("#a-model").placeholder = (loadedConfig.ollama && loadedConfig.ollama.model) || "model";
+  $("#c-cpus").placeholder = loadedConfig.default_cpus || "cpus";
+  $("#c-mem").placeholder = loadedConfig.default_memory_mb || "mem MB";
+  $("#c-disk").placeholder = loadedConfig.default_disk_gb || "disk GB";
+}
+$("#cfg-save").onclick = async () => {
+  if (!loadedConfig) return;
+  const nc = JSON.parse(JSON.stringify(loadedConfig));
+  for (const g of CONFIG_FIELDS) {
+    for (const f of g.fields) {
+      const raw = $("#cfg-" + f.path).value;
+      setPath(nc, f.path, f.num ? (parseInt(raw, 10) || 0) : raw);
+    }
+  }
+  $("#cfg-save").disabled = true;
+  try {
+    const res = await j("/v1/config", { method: "PUT", json: nc });
+    loadedConfig = nc;
+    let msg = "saved";
+    if (res.restart_required) msg += " — restart `exe serve` for: " + res.restart_required.join(", ");
+    $("#cfg-status").textContent = msg;
+    toast(msg);
+  } catch (e) { toast(e.message); }
+  $("#cfg-save").disabled = false;
+};
+
+// ---- boot ----
+loadVMs().catch(e => toast(e.message));
+loadConfig().catch(() => {});
+setInterval(() => {
+  if (!document.hidden && activeTab === "vms" && !currentVM) loadVMs().catch(() => {});
+}, 5000);
+</script>
+</body>
+</html>
