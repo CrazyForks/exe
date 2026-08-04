@@ -84,6 +84,85 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	return nil
 }
 
+type IDName struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type Tunnel struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	RemoteConfig bool   `json:"remote_config"`
+}
+
+// VerifyToken checks that the API token itself is valid and active.
+func (c *Client) VerifyToken(ctx context.Context) error {
+	var res struct {
+		Status string `json:"status"`
+	}
+	if err := c.do(ctx, "GET", "/user/tokens/verify", nil, &res); err != nil {
+		return err
+	}
+	if res.Status != "active" {
+		return fmt.Errorf("token status is %q, expected active", res.Status)
+	}
+	return nil
+}
+
+func (c *Client) ListAccounts(ctx context.Context) ([]IDName, error) {
+	var out []IDName
+	err := c.do(ctx, "GET", "/accounts?per_page=50", nil, &out)
+	return out, err
+}
+
+func (c *Client) ListZones(ctx context.Context) ([]IDName, error) {
+	var out []IDName
+	err := c.do(ctx, "GET", "/zones?per_page=50", nil, &out)
+	return out, err
+}
+
+func (c *Client) ListTunnels(ctx context.Context) ([]Tunnel, error) {
+	var out []Tunnel
+	err := c.do(ctx, "GET", "/accounts/"+c.AccountID+"/cfd_tunnel?is_deleted=false&per_page=50", nil, &out)
+	return out, err
+}
+
+func (c *Client) GetTunnel(ctx context.Context, id string) (*Tunnel, error) {
+	var out Tunnel
+	if err := c.do(ctx, "GET", "/accounts/"+c.AccountID+"/cfd_tunnel/"+id, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CheckDNSAccess verifies the token can read DNS records in the zone — the
+// exact capability EnsureDNS needs (DNS Edit implies read).
+func (c *Client) CheckDNSAccess(ctx context.Context) error {
+	var out []json.RawMessage
+	return c.do(ctx, "GET", "/zones/"+c.ZoneID+"/dns_records?per_page=1", nil, &out)
+}
+
+// ZoneName resolves the zone's domain name. Tokens without Zone Read fall
+// back to the zone_name field of an existing DNS record; empty if neither
+// route works.
+func (c *Client) ZoneName(ctx context.Context) (string, error) {
+	var z IDName
+	if err := c.do(ctx, "GET", "/zones/"+c.ZoneID, nil, &z); err == nil && z.Name != "" {
+		return z.Name, nil
+	}
+	var recs []struct {
+		ZoneName string `json:"zone_name"`
+	}
+	if err := c.do(ctx, "GET", "/zones/"+c.ZoneID+"/dns_records?per_page=1", nil, &recs); err != nil {
+		return "", err
+	}
+	if len(recs) > 0 {
+		return recs[0].ZoneName, nil
+	}
+	return "", nil
+}
+
 // EnsureDNS upserts a proxied CNAME fqdn -> <tunnel>.cfargotunnel.com.
 func (c *Client) EnsureDNS(ctx context.Context, fqdn string) error {
 	content := c.TunnelID + ".cfargotunnel.com"

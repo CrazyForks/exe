@@ -32,6 +32,12 @@ type Server struct {
 
 	cfg        atomic.Pointer[config.Config]
 	activeRuns sync.Map // transcript id -> struct{}
+
+	// Cached Cloudflare heartbeat so UI polling doesn't hammer the CF API.
+	cfHealthMu  sync.Mutex
+	cfHealthAt  time.Time
+	cfHealthKey string
+	cfHealthRes map[string]any
 }
 
 func New(cfg *config.Config, vms vmm.Manager, px *proxy.Proxy, keyPath, stateDir string) *Server {
@@ -58,6 +64,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/vms/{name}/terminal", s.handleTerminal)
 	mux.HandleFunc("GET /v1/vms/{name}/transcripts", s.handleTranscripts)
 	mux.HandleFunc("GET /v1/vms/{name}/transcripts/{id}", s.handleTranscript)
+	mux.HandleFunc("POST /v1/cloudflare/wizard", s.handleCFWizard)
+	mux.HandleFunc("GET /v1/cloudflare/health", s.handleCFHealth)
 	mux.HandleFunc("GET /v1/config", s.handleConfigGet)
 	mux.HandleFunc("PUT /v1/config", s.handleConfigPut)
 	mux.HandleFunc("GET /v1/routes", s.handleRoutes)

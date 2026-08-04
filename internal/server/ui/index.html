@@ -32,7 +32,12 @@ nav { display: flex; gap: 4px; }
 nav button { background: none; border: none; color: var(--muted); padding: 6px 12px;
   border-radius: 8px; font-size: 14px; cursor: pointer; }
 nav button.active { background: var(--bg); color: var(--text); font-weight: 600; }
-#token { margin-left: auto; width: 150px; }
+#token { width: 150px; }
+#cf-dot { margin-left: auto; display: flex; align-items: center; gap: 7px;
+  background: none; border: none; cursor: pointer; padding: 6px 8px; border-radius: 8px; }
+#cf-dot:hover { background: var(--bg); }
+.dot { width: 11px; height: 11px; border-radius: 50%; background: var(--muted);
+  display: inline-block; transition: background .3s; }
 main { max-width: 980px; margin: 0 auto; padding: 20px; }
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
   padding: 16px; margin-bottom: 16px; }
@@ -48,6 +53,7 @@ button.btn { background: var(--accent); color: var(--accent-text); border: none;
 button.btn:disabled { opacity: .5; cursor: default; }
 button.ghost { background: none; border: 1px solid var(--border); color: var(--text);
   border-radius: 8px; padding: 5px 10px; font-size: 13px; cursor: pointer; }
+button.ghost.lg { padding: 8px 14px; font-size: 14px; }
 button.ghost.danger { color: var(--red); }
 button.ghost.armed { background: var(--red); border-color: var(--red); color: #fff; }
 table { width: 100%; border-collapse: collapse; }
@@ -78,6 +84,17 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; }
 #term-box { height: 400px; background: #000; border-radius: 8px; padding: 6px 0 6px 6px; }
 #term-box .xterm { height: 100%; }
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center; z-index: 50; }
+.modal { background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+  width: 92%; max-width: 540px; max-height: 85vh; overflow: auto; padding: 20px; }
+.modal select, .modal input[type=text], .modal input[type=password] { width: 100%; }
+.wiz-fb { border-radius: 8px; padding: 8px 12px; font-size: 13.5px; white-space: pre-wrap; }
+.wiz-fb.ok { background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); }
+.wiz-fb.err { background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); }
+.wiz-fb.warn { background: color-mix(in srgb, var(--amber) 12%, transparent); color: var(--amber); }
+.wiz-review div { padding: 5px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 12px; }
+.wiz-review div:last-child { border-bottom: none; }
 .t-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .field label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 3px; }
@@ -89,6 +106,7 @@ a:hover { text-decoration: underline; }
 #status-bar.show { opacity: .95; }
 h2 { margin: 4px 0 12px; }
 @media (max-width: 640px) { td:nth-child(3), th:nth-child(3) { display: none; } }
+[hidden] { display: none !important; }
 </style>
 </head>
 <body>
@@ -98,6 +116,10 @@ h2 { margin: 4px 0 12px; }
     <button id="nav-vms" class="active">VMs</button>
     <button id="nav-config">Config</button>
   </nav>
+  <button id="cf-dot" title="Cloudflare status — checking…">
+    <span id="cf-dot-circle" class="dot"></span>
+    <span class="muted" style="font-size:13px">Cloudflare</span>
+  </button>
   <input id="token" type="password" placeholder="API token" title="Only needed if api_token is set">
 </header>
 
@@ -203,7 +225,10 @@ h2 { margin: 4px 0 12px; }
 
 <section id="tab-config" hidden>
   <div class="card">
-    <h3>Configuration <span class="muted" style="text-transform:none">(~/.exe/config.json — fields marked &#42; need a daemon restart)</span></h3>
+    <div class="row" style="justify-content:space-between">
+      <h3 style="margin:0">Configuration <span class="muted" style="text-transform:none">(~/.exe/config.json — fields marked &#42; need a daemon restart)</span></h3>
+      <button class="ghost" id="wiz-start">Cloudflare setup wizard</button>
+    </div>
     <div id="cfg-form"></div>
     <div class="row" style="margin-top:14px">
       <button class="btn" id="cfg-save">Save</button>
@@ -214,6 +239,37 @@ h2 { margin: 4px 0 12px; }
 </main>
 
 <div id="status-bar"></div>
+
+<div id="sum-overlay" class="overlay" hidden>
+  <div class="modal">
+    <div class="row" style="justify-content:space-between">
+      <h3 style="margin:0">Cloudflare status</h3>
+      <button class="ghost" id="sum-x" title="Close">&#10005;</button>
+    </div>
+    <div id="sum-body" style="margin-top:12px"></div>
+    <div class="row" style="justify-content:space-between; margin-top:18px">
+      <button class="ghost lg" id="sum-recheck">Re-check now</button>
+      <button class="btn" id="sum-restart">Start over&hellip;</button>
+    </div>
+  </div>
+</div>
+
+<div id="wiz-overlay" class="overlay" hidden>
+  <div class="modal">
+    <div class="row" style="justify-content:space-between">
+      <h3 id="wiz-title" style="margin:0"></h3>
+      <button class="ghost" id="wiz-x" title="Close">&#10005;</button>
+    </div>
+    <div class="muted" id="wiz-ind" style="margin:2px 0 12px; font-size:12.5px"></div>
+    <div id="wiz-desc" style="margin-bottom:12px; font-size:14px"></div>
+    <div id="wiz-input"></div>
+    <div id="wiz-fb" style="margin-top:12px"></div>
+    <div class="row" style="justify-content:space-between; margin-top:18px">
+      <button class="ghost lg" id="wiz-back">&larr; Back</button>
+      <button class="btn" id="wiz-next">Validate &amp; continue</button>
+    </div>
+  </div>
+</div>
 
 <script>
 "use strict";
@@ -419,10 +475,19 @@ async function loadPorts() {
   const items = [];
   for (const p of d.ports) {
     const url = `http://${d.ip}:${p.port}/`;
+    const exposeBtn = el("button", { class: "ghost" }, "Expose");
+    exposeBtn.onclick = async () => {
+      exposeBtn.disabled = true;
+      exposeBtn.textContent = "Exposing…";
+      await doExpose(p.port, "");
+      exposeBtn.disabled = false;
+      exposeBtn.textContent = "Expose";
+    };
     items.push(el("div", { class: "svc-item" },
       el("span", { class: "mono" }, ":" + p.port),
       el("span", { class: "muted" }, p.process || ""),
-      el("a", { href: url, target: "_blank", rel: "noopener", class: "mono", style: "margin-left:auto" }, url + " ↗")));
+      el("a", { href: url, target: "_blank", rel: "noopener", class: "mono", style: "margin-left:auto" }, url + " ↗"),
+      exposeBtn));
   }
   for (const [host, backend] of Object.entries(routes)) {
     if (backend.startsWith(`http://${d.ip}:`)) {
@@ -474,19 +539,40 @@ $("#a-run").onclick = async () => {
 };
 
 // ---- expose ----
+function cfIncomplete(cfg) {
+  const c = (cfg && cfg.cloudflare) || {};
+  return !(c.api_token && c.account_id && c.zone_id && c.tunnel_id && c.domain);
+}
+async function doExpose(port, subdomain) {
+  try { loadedConfig = await j("/v1/config"); } catch (e) {}
+  if (cfIncomplete(loadedConfig)) {
+    toast("Cloudflare isn't set up yet — finish the wizard, then expose again.");
+    wizOpen();
+    return;
+  }
+  try {
+    const res = await j(`/v1/vms/${currentVM}/expose`, { method: "POST", json: { port, subdomain } });
+    const warns = res.warnings || [];
+    const lines = [`route: ${res.host} → ${res.backend}`];
+    if (res.ingress) lines.push("tunnel ingress → " + res.ingress);
+    for (const wmsg of warns) lines.push("⚠ " + wmsg);
+    lines.push("url: " + res.url);
+    $("#e-result").textContent = lines.join("\n");
+    $("#e-result").style.whiteSpace = "pre-wrap";
+    loadPorts().catch(() => {});
+    if (warns.some(wmsg => wmsg.startsWith("dns:") || wmsg.startsWith("ingress:") || wmsg.includes("not fully configured"))) {
+      toast("Cloudflare API calls failed — re-validate in the wizard.");
+      wizOpen();
+    } else {
+      toast(res.host + " → :" + port);
+    }
+  } catch (e) { toast(e.message); }
+}
 $("#e-go").onclick = async () => {
   const port = parseInt($("#e-port").value, 10);
   if (!port) { toast("port required"); return; }
   $("#e-go").disabled = true;
-  try {
-    const res = await j(`/v1/vms/${currentVM}/expose`, { method: "POST", json: { port, subdomain: $("#e-sub").value.trim() } });
-    const lines = [`route: ${res.host} → ${res.backend}`];
-    if (res.ingress) lines.push("tunnel ingress → " + res.ingress);
-    for (const wmsg of res.warnings || []) lines.push("⚠ " + wmsg);
-    lines.push("url: " + res.url);
-    $("#e-result").textContent = lines.join("\n");
-    $("#e-result").style.whiteSpace = "pre-wrap";
-  } catch (e) { toast(e.message); }
+  await doExpose(port, $("#e-sub").value.trim());
   $("#e-go").disabled = false;
 };
 
@@ -598,9 +684,226 @@ $("#cfg-save").onclick = async () => {
   $("#cfg-save").disabled = false;
 };
 
+// ---- cloudflare wizard ----
+const WIZ_STEPS = [
+  { key: "api_token", title: "API token", secret: true,
+    desc: () => el("span", {},
+      "Create a token at ", el("a", { href: "https://dash.cloudflare.com/profile/api-tokens", target: "_blank", rel: "noopener" }, "dash.cloudflare.com → API Tokens"),
+      " → Create Token → Custom token, with two permissions: ",
+      el("b", {}, "Zone → DNS → Edit"), " and ", el("b", {}, "Account → Cloudflare Tunnel → Edit"),
+      ". Paste it below — it is validated against Cloudflare before moving on.") },
+  { key: "account_id", title: "Account", optionsKey: "accounts",
+    desc: () => el("span", {}, "The Cloudflare account that owns your tunnel. If no list appears, copy the Account ID from the dashboard's right sidebar on any zone page.") },
+  { key: "zone_id", title: "Zone", optionsKey: "zones",
+    desc: () => el("span", {}, "The zone (domain) whose DNS records exe will manage. Validation confirms the token can edit DNS there.") },
+  { key: "tunnel_id", title: "Tunnel", optionsKey: "tunnels",
+    desc: () => el("span", {}, "Your cloudflared tunnel (Zero Trust → Networks → Tunnels) — the one running on your LAN server. Remotely-managed tunnels work best: exe can push ingress rules to them via the API.") },
+  { key: "domain", title: "Base domain",
+    desc: () => el("span", {}, "Apps publish as ", el("span", { class: "mono" }, "<name>.<this domain>"),
+      ". Use the zone apex (example.com) or a namespace like apps.example.com.") },
+  { key: "review", title: "Review & save",
+    desc: () => el("span", {}, "Everything validated. Save writes these values to the cloudflare section of your config (hot-reloaded, no restart needed).") },
+];
+const wiz = { idx: 0, values: {}, options: {}, zoneName: "" };
+
+function wizOpen(fresh) {
+  const c = fresh === true ? {} : (loadedConfig && loadedConfig.cloudflare) || {};
+  wiz.idx = 0;
+  wiz.values = { api_token: c.api_token || "", account_id: c.account_id || "",
+    zone_id: c.zone_id || "", tunnel_id: c.tunnel_id || "", domain: c.domain || "" };
+  wiz.options = {};
+  wiz.zoneName = "";
+  $("#wiz-overlay").hidden = false;
+  wizRender();
+}
+function wizClose() { $("#wiz-overlay").hidden = true; }
+$("#wiz-start").onclick = () => wizOpen(false);
+$("#wiz-x").onclick = wizClose;
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  if (!$("#wiz-overlay").hidden) wizClose();
+  if (!$("#sum-overlay").hidden) $("#sum-overlay").hidden = true;
+});
+
+function wizFeedback(kind, text) {
+  const fb = $("#wiz-fb");
+  fb.replaceChildren();
+  if (text) fb.append(el("div", { class: "wiz-fb " + kind }, text));
+}
+
+function wizOptionLabel(key, o) {
+  if (key === "tunnels") return `${o.name} — ${o.status}${o.remote_config ? "" : " (locally managed)"}`;
+  return `${o.name} (${o.id.slice(0, 8)}…)`;
+}
+
+function wizRender() {
+  const step = WIZ_STEPS[wiz.idx];
+  $("#wiz-title").textContent = "Cloudflare setup — " + step.title;
+  $("#wiz-ind").textContent = `Step ${wiz.idx + 1} of ${WIZ_STEPS.length}`;
+  $("#wiz-desc").replaceChildren(step.desc());
+  $("#wiz-back").style.visibility = wiz.idx === 0 ? "hidden" : "visible";
+  $("#wiz-next").textContent = step.key === "review" ? "Save configuration" : "Validate & continue";
+  wizFeedback("", "");
+  const box = $("#wiz-input");
+  box.replaceChildren();
+
+  if (step.key === "review") {
+    const rev = el("div", { class: "wiz-review mono", style: "font-size:13px" });
+    const show = v => v || "—";
+    rev.append(
+      el("div", {}, el("span", { class: "muted" }, "api_token"), el("span", {}, wiz.values.api_token ? "••••" + wiz.values.api_token.slice(-4) : "—")),
+      el("div", {}, el("span", { class: "muted" }, "account_id"), el("span", {}, show(wiz.values.account_id))),
+      el("div", {}, el("span", { class: "muted" }, "zone_id"), el("span", {}, show(wiz.values.zone_id) + (wiz.zoneName ? ` (${wiz.zoneName})` : ""))),
+      el("div", {}, el("span", { class: "muted" }, "tunnel_id"), el("span", {}, show(wiz.values.tunnel_id))),
+      el("div", {}, el("span", { class: "muted" }, "domain"), el("span", {}, show(wiz.values.domain))));
+    box.append(rev);
+    if (loadedConfig && !loadedConfig.advertise_host) {
+      box.append(el("div", { class: "wiz-fb warn", style: "margin-top:10px" },
+        "advertise_host is empty — after saving, set it in Config to this Mac's LAN or Tailscale IP (as reachable from the tunnel server), or published hostnames won't route back here."));
+    }
+    return;
+  }
+
+  const opts = step.optionsKey ? wiz.options[step.optionsKey] : null;
+  if (opts && opts.length) {
+    const sel = el("select", { id: "wiz-val" });
+    for (const o of opts) {
+      const opt = el("option", { value: o.id }, wizOptionLabel(step.optionsKey, o));
+      if (o.id === wiz.values[step.key]) opt.selected = true;
+      sel.append(opt);
+    }
+    sel.append(el("option", { value: "__manual" }, "Enter an ID manually…"));
+    sel.addEventListener("change", () => {
+      if (sel.value === "__manual") {
+        box.replaceChildren(el("input", { id: "wiz-val", type: "text", value: wiz.values[step.key] || "", placeholder: step.key }));
+        box.querySelector("input").focus();
+      }
+    });
+    box.append(sel);
+  } else {
+    const input = el("input", {
+      id: "wiz-val",
+      type: step.secret ? "password" : "text",
+      value: wiz.values[step.key] || "",
+      placeholder: step.key === "domain" && wiz.zoneName ? wiz.zoneName : step.key,
+    });
+    input.addEventListener("keydown", e => { if (e.key === "Enter") $("#wiz-next").click(); });
+    box.append(input);
+  }
+}
+
+$("#wiz-back").onclick = () => { if (wiz.idx > 0) { wiz.idx--; wizRender(); } };
+$("#wiz-next").onclick = async () => {
+  const step = WIZ_STEPS[wiz.idx];
+  const btn = $("#wiz-next");
+
+  if (step.key === "review") {
+    btn.disabled = true;
+    try {
+      const cur = await j("/v1/config");
+      cur.cloudflare = {
+        api_token: wiz.values.api_token, account_id: wiz.values.account_id,
+        zone_id: wiz.values.zone_id, tunnel_id: wiz.values.tunnel_id, domain: wiz.values.domain,
+      };
+      await j("/v1/config", { method: "PUT", json: cur });
+      toast("Cloudflare configuration saved");
+      wizClose();
+      loadConfig().catch(() => {});
+      cfHeartbeat(true);
+    } catch (e) { wizFeedback("err", e.message); }
+    btn.disabled = false;
+    return;
+  }
+
+  let val = $("#wiz-val").value.trim();
+  if (val === "__manual") { wizFeedback("err", "Pick an entry or choose manual input."); return; }
+  if (step.key === "domain" && !val && wiz.zoneName) val = wiz.zoneName;
+  wiz.values[step.key] = val;
+
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+  wizFeedback("", "");
+  try {
+    const res = await j("/v1/cloudflare/wizard", { method: "POST", json: {
+      step: step.key, zone_name: wiz.zoneName,
+      api_token: wiz.values.api_token, account_id: wiz.values.account_id,
+      zone_id: wiz.values.zone_id, tunnel_id: wiz.values.tunnel_id, domain: wiz.values.domain,
+    }});
+    if (!res.ok) {
+      wizFeedback("err", res.message || "validation failed");
+    } else {
+      for (const k of ["accounts", "zones", "tunnels"]) if (res[k]) wiz.options[k] = res[k];
+      if (res.zone_name) wiz.zoneName = res.zone_name;
+      wizFeedback("ok", res.message + (res.warning ? "\n\n⚠ " + res.warning : ""));
+      setTimeout(() => { wiz.idx++; wizRender(); }, res.warning ? 2200 : 700);
+    }
+  } catch (e) { wizFeedback("err", e.message); }
+  btn.disabled = false;
+  btn.textContent = WIZ_STEPS[wiz.idx].key === "review" ? "Save configuration" : "Validate & continue";
+};
+
+// ---- cloudflare heartbeat ----
+let cfLast = null;
+async function cfHeartbeat(force) {
+  try {
+    const h = await j("/v1/cloudflare/health" + (force ? "?force=1" : ""));
+    cfLast = h;
+    $("#cf-dot-circle").style.background = h.status === "ok" ? "var(--green)" : "var(--amber)";
+    $("#cf-dot").title = h.message || ("Cloudflare status: " + h.status);
+  } catch (e) { /* keep last known color */ }
+}
+$("#cf-dot").onclick = () => {
+  if (cfLast && cfLast.status === "ok") sumOpen();
+  else wizOpen(false);
+};
+
+// ---- cloudflare status summary ----
+async function sumOpen() {
+  $("#sum-overlay").hidden = false;
+  $("#sum-body").replaceChildren(el("span", { class: "muted" }, "loading…"));
+  try { loadedConfig = await j("/v1/config"); } catch (e) {}
+  renderSum();
+}
+function renderSum() {
+  const c = (loadedConfig && loadedConfig.cloudflare) || {};
+  const body = $("#sum-body");
+  body.replaceChildren();
+  if (cfLast) {
+    body.append(el("div", { class: "wiz-fb " + (cfLast.status === "ok" ? "ok" : "warn") },
+      cfLast.message || cfLast.status));
+  }
+  const rev = el("div", { class: "wiz-review mono", style: "font-size:13px; margin-top:12px" });
+  const row = (k, v) => el("div", {}, el("span", { class: "muted" }, k), el("span", {}, v || "—"));
+  rev.append(
+    row("api_token", c.api_token ? "••••" + c.api_token.slice(-4) : ""),
+    row("account_id", c.account_id),
+    row("zone_id", c.zone_id),
+    row("tunnel_id", c.tunnel_id),
+    row("domain", c.domain),
+    row("last checked", cfLast && cfLast.checked_at ? new Date(cfLast.checked_at).toLocaleString() : ""));
+  body.append(rev);
+}
+$("#sum-x").onclick = () => { $("#sum-overlay").hidden = true; };
+$("#sum-recheck").onclick = async () => {
+  const b = $("#sum-recheck");
+  b.disabled = true;
+  b.textContent = "Checking…";
+  await cfHeartbeat(true);
+  renderSum();
+  b.disabled = false;
+  b.textContent = "Re-check now";
+};
+$("#sum-restart").onclick = () => {
+  $("#sum-overlay").hidden = true;
+  wizOpen(true);
+};
+setInterval(() => { if (!document.hidden) cfHeartbeat(false); }, 30000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) cfHeartbeat(false); });
+
 // ---- boot ----
 loadVMs().catch(e => toast(e.message));
 loadConfig().catch(() => {});
+cfHeartbeat(false);
 setInterval(() => {
   if (!document.hidden && activeTab === "vms" && !currentVM) loadVMs().catch(() => {});
 }, 5000);
