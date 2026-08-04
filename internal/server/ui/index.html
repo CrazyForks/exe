@@ -129,11 +129,31 @@ a { color: #202a87; text-decoration: underline; }
 .window.modal { position: relative; z-index: 2001; width: 92%; max-width: 540px; }
 .window.modal .win-body { max-height: 74vh; }
 
-/* ---------- group boxes (cards) ---------- */
-.card { position: relative; border: 1px solid var(--g600); margin: 14px 0 16px; padding: 16px 10px 10px;
-  box-shadow: 1px 1px 0 #fff, inset 1px 1px 0 #fff; }
-.card > h3 { position: absolute; top: -8px; left: 10px; margin: 0; background: var(--g300);
-  padding: 0 6px; font-size: 11px; font-weight: bold; letter-spacing: .02em; }
+/* ---------- Platinum tab control ----------
+   Geometry measured from a real OS 9 Appearance control panel screenshot:
+   trapezoid tabs (sides flare ~10px over 21px height, 3px top radius);
+   inactive fill #ccc with #ddd top-left highlight + #aaa right shadow;
+   active fill #eee (the pane color) and it punches through the pane's
+   top border + bevel rows. Shape drawn as an SVG border-image. */
+.tabbar { display: flex; align-items: flex-start; padding: 0 4px; position: relative; z-index: 2; }
+.tab {
+  height: 22px; color: #000; font-size: 11px; font-weight: bold; line-height: 14px;
+  text-align: center; padding: 0 2px; position: relative;
+  border-style: solid; border-width: 8px 14px 0 14px;
+  /* sides drawn 1px past the bottom edge so the slant runs at full
+     strength into the pane rule instead of fading out */
+  border-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='44' height='22'><path d='M4.5 23 L11 5.5 Q11.8 1.5 14 1.5 L30 1.5 Q32.2 1.5 33 5.5 L39.5 23' fill='%23ccc' stroke='%23000'/><path d='M6.2 23 L12 5.8 Q12.6 2.5 14 2.5 L29.5 2.5' fill='none' stroke='%23ddd'/><path d='M30 2.5 Q31.6 2.5 32.2 5.8 L37.8 23' fill='none' stroke='%23aaa'/></svg>") 8 14 0 14 fill stretch;
+}
+.tab + .tab { margin-left: -7px; }
+.tab.active {
+  height: 25px; margin-bottom: -3px; z-index: 3;
+  /* black sides end at the rule (y22); below it only the fill continues,
+     still following the slant, covering the pane's border + bevel rows */
+  border-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='44' height='25'><path d='M3.8 25 L11 5.5 Q11.8 1.5 14 1.5 L30 1.5 Q32.2 1.5 33 5.5 L40.2 25 Z' fill='%23eee'/><path d='M4.9 22 L11 5.5 Q11.8 1.5 14 1.5 L30 1.5 Q32.2 1.5 33 5.5 L39.1 22' fill='none' stroke='%23000'/><path d='M6.6 22 L12 5.8 Q12.6 2.5 14 2.5 L29.5 2.5' fill='none' stroke='%23fff'/><path d='M30 2.5 Q31.6 2.5 32.2 5.8 L37.4 22' fill='none' stroke='%23bbb'/></svg>") 8 14 0 14 fill stretch;
+}
+.tabpanel { position: relative; border: 1px solid var(--black); background: var(--g200);
+  padding: 12px 10px 10px; min-height: 280px;
+  box-shadow: inset 1px 1px 0 var(--g400), inset 2px 2px 0 #fff, inset -1px -1px 0 var(--g500); }
 
 /* ---------- controls (macthemes.garden pixel bevels) ---------- */
 button { font: inherit; cursor: default; }
@@ -165,6 +185,11 @@ input:focus, textarea:focus, select:focus { outline: 2px solid #9999fe; outline-
 textarea { width: 100%; min-height: 64px; resize: vertical; font-family: var(--mono); font-size: 11px; }
 select { padding: 2px 4px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.row:last-child { margin-bottom: 0; }
+/* field + primary-button rows: bottom-align, lifting ringed buttons so their
+   outline (3px past the border) lines up optically with the input bottoms */
+.row.actions { align-items: flex-end; }
+.row.actions .btn { margin-bottom: 2px; margin-left: auto; }
 .field label { display: block; font-size: 11px; color: #222; margin-bottom: 3px; }
 .field input { width: 100%; }
 .field .hint { font-size: 10.5px; color: #7a4b00; margin-top: 2px; }
@@ -192,14 +217,15 @@ tr.vm-row:hover td { background: #dfe3f5; }
 
 /* misc panels */
 pre.out { background: #10120f; color: #cfe3cf; border: 1px solid var(--black); padding: 10px;
-  font-family: var(--mono); font-size: 11px; max-height: 380px; overflow: auto;
+  margin: 10px 0 0; font-family: var(--mono); font-size: 11px; max-height: 380px; overflow: auto;
   white-space: pre-wrap; word-break: break-word; user-select: text;
   box-shadow: -1px -1px 0 var(--g600), 1px 1px 0 #fff; }
-.svc-item { display: flex; gap: 10px; align-items: baseline; padding: 5px 8px;
+.svc-item { display: flex; gap: 10px; align-items: center; min-height: 27px; padding: 3px 8px;
   border: 1px solid var(--g600); background: var(--g200); margin-bottom: 5px;
   box-shadow: inset 1px 1px 0 #fff; }
-.t-item { padding: 5px 8px; border: 1px solid var(--g600); background: var(--g200); margin-bottom: 5px;
-  display: flex; gap: 10px; align-items: baseline; box-shadow: inset 1px 1px 0 #fff; }
+.svc-item:last-child, .t-item:last-child { margin-bottom: 0; }
+.t-item { padding: 3px 8px; border: 1px solid var(--g600); background: var(--g200); margin-bottom: 5px;
+  display: flex; gap: 10px; align-items: center; min-height: 27px; box-shadow: inset 1px 1px 0 #fff; }
 .t-item.sel { background: var(--hl); }
 .t-item.sel, .t-item.sel .muted, .t-item.sel .mono { color: #fff; }
 .t-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
@@ -308,61 +334,68 @@ td .mono, .svc-item .mono { user-select: text; }
       <div class="stripe"></div><button class="tbox zoom"></button><button class="tbox shade"></button></div>
     <div class="win-frame">
       <div class="win-body">
-        <div class="row">
+        <div class="row" style="margin-bottom:10px">
           <span class="chip" id="d-state"></span>
           <span class="mono muted" id="d-ip"></span>
         </div>
 
-        <div class="card">
-          <h3>Web Services</h3>
-          <div class="row" style="justify-content:flex-end; margin:0 0 6px">
-            <button class="ghost sm" id="svc-refresh">Refresh</button>
-          </div>
-          <div id="svc-list"><span class="muted">…</span></div>
+        <div class="tabbar">
+          <div class="tab active" data-tab="svc">Services</div>
+          <div class="tab" data-tab="term">Terminal</div>
+          <div class="tab" data-tab="vibe">Agent</div>
+          <div class="tab" data-tab="expose">Expose</div>
+          <div class="tab" data-tab="tr">Transcripts</div>
         </div>
-
-        <div class="card">
-          <h3>Terminal</h3>
-          <div class="row" style="justify-content:flex-end; margin:0 0 6px">
-            <button class="ghost sm" id="term-open">Connect</button>
-            <button class="ghost sm" id="term-close" hidden>Disconnect</button>
-          </div>
-          <div id="term-box" hidden></div>
-        </div>
-
-        <div class="card">
-          <h3>Vibe Code</h3>
-          <textarea id="a-prompt" placeholder="Build me a…"></textarea>
-          <div class="row" style="margin-top:10px; align-items:flex-end">
-            <div class="field" style="width:220px">
-              <label for="a-model">Model (blank = default)</label>
-              <input id="a-model">
+        <div class="tabpanel">
+          <div class="pane" id="pane-svc">
+            <div class="row">
+              <span class="muted">Ports listening in the VM, and published routes.</span>
+              <button class="ghost sm" id="svc-refresh" style="margin-left:auto">Refresh</button>
             </div>
-            <button class="btn" id="a-run">Run Agent</button>
+            <div id="svc-list"><span class="muted">…</span></div>
           </div>
-          <pre class="out" id="a-out" hidden></pre>
-        </div>
 
-        <div class="card">
-          <h3>Expose</h3>
-          <div class="row" style="align-items:flex-end">
-            <div class="field" style="width:100px">
-              <label for="e-port">VM port</label>
-              <input id="e-port" type="number" placeholder="8000">
+          <div class="pane" id="pane-term" hidden>
+            <div class="row">
+              <span class="muted" id="term-hint">Not connected.</span>
+              <button class="ghost sm" id="term-open" style="margin-left:auto">Connect</button>
+              <button class="ghost sm" id="term-close" style="margin-left:auto" hidden>Disconnect</button>
             </div>
-            <div class="field" style="width:230px">
-              <label for="e-sub">Subdomain (blank = VM name)</label>
-              <input id="e-sub">
-            </div>
-            <button class="btn" id="e-go">Expose</button>
+            <div id="term-box" hidden></div>
           </div>
-          <div id="e-result" class="mono muted"></div>
-        </div>
 
-        <div class="card">
-          <h3>Vibe Code Transcripts</h3>
-          <div id="t-list"><span class="muted">None yet.</span></div>
-          <pre class="out" id="t-log" hidden></pre>
+          <div class="pane" id="pane-vibe" hidden>
+            <div class="muted" style="margin-bottom:8px">Tell the agent what you want — it gets a shell in this VM and can install packages, write code, and start services on its own.</div>
+            <textarea id="a-prompt" placeholder="Build a snake game and serve it on port 8000"></textarea>
+            <div class="row actions" style="margin-top:10px">
+              <div class="field" style="width:220px">
+                <label for="a-model">Model (blank = default)</label>
+                <input id="a-model">
+              </div>
+              <button class="btn" id="a-run">Run Agent</button>
+            </div>
+            <pre class="out" id="a-out" hidden></pre>
+          </div>
+
+          <div class="pane" id="pane-expose" hidden>
+            <div class="row actions">
+              <div class="field" style="width:100px">
+                <label for="e-port">VM port</label>
+                <input id="e-port" type="number" placeholder="8000">
+              </div>
+              <div class="field" style="width:230px">
+                <label for="e-sub">Subdomain (blank = VM name)</label>
+                <input id="e-sub">
+              </div>
+              <button class="btn" id="e-go">Expose</button>
+            </div>
+            <div id="e-result" class="mono muted" style="margin-top:6px"></div>
+          </div>
+
+          <div class="pane" id="pane-tr" hidden>
+            <div id="t-list"><span class="muted">No agent runs yet — each run in this VM is logged here.</span></div>
+            <pre class="out" id="t-log" hidden></pre>
+          </div>
         </div>
       </div>
     </div>
@@ -448,7 +481,7 @@ td .mono, .svc-item .mono { user-select: text; }
         <div id="about-icon"></div>
         <div style="font-weight:bold; font-size:14px; margin-top:8px">exe</div>
         <div class="muted" style="margin-top:2px">a personal cloud for this Mac</div>
-        <div class="muted" style="margin-top:10px">VMs by Virtualization.framework · vibe coding by Ollama<br>publishing by Cloudflare Tunnel</div>
+        <div class="muted" style="margin-top:10px">VMs by Virtualization.framework · agent by Ollama<br>publishing by Cloudflare Tunnel</div>
         <div style="margin-top:10px"><a href="https://github.com/livid/exe" target="_blank" rel="noopener">github.com/livid/exe</a></div>
       </div>
     </div>
@@ -721,6 +754,11 @@ let currentVM = null;
 function chip(state) { return el("span", { class: "chip " + state }, state); }
 async function loadVMs() {
   const vms = await j("/v1/vms");
+  // skip the re-render when nothing changed — a rebuild mid-double-click
+  // splits the two clicks across DOM generations and swallows the dblclick
+  const sig = JSON.stringify(vms);
+  if (sig === loadVMs._last) return;
+  loadVMs._last = sig;
   const tb = $("#vm-rows");
   tb.replaceChildren();
   $("#vm-empty").hidden = vms.length > 0;
@@ -790,6 +828,18 @@ $("#c-go").onclick = async () => {
 };
 
 // ---- vm detail ----
+function showPane(key) {
+  document.querySelectorAll("#win-detail .tab").forEach(t => t.classList.toggle("active", t.dataset.tab === key));
+  document.querySelectorAll("#win-detail .pane").forEach(p => { p.hidden = p.id !== "pane-" + key; });
+  if (key === "term") {
+    // auto-connect on tab click; readyState >= 2 catches sessions that died remotely
+    const dead = !termWS || termWS.readyState >= 2;
+    if (dead && $("#d-state").textContent === "running") $("#term-open").click();
+    termResize();
+  }
+}
+document.querySelectorAll("#win-detail .tab").forEach(t =>
+  t.addEventListener("click", () => showPane(t.dataset.tab)));
 async function openVM(name) {
   if (currentVM !== name) closeTerm();
   currentVM = name;
@@ -797,6 +847,7 @@ async function openVM(name) {
   $("#a-out").hidden = true;
   $("#t-log").hidden = true;
   $("#e-result").textContent = "";
+  showPane("svc");
   openWin("#win-detail");
   await refreshDetailHead();
   loadPorts().catch(() => {});
@@ -819,6 +870,7 @@ function closeTerm() {
   if (termWS) { termWS.onclose = null; try { termWS.close(); } catch (e) {} termWS = null; }
   if (term) { term.dispose(); term = null; }
   $("#term-box").hidden = true;
+  $("#term-hint").hidden = false;
   $("#term-close").hidden = true;
   $("#term-open").hidden = false;
 }
@@ -831,6 +883,7 @@ function termResize() {
 $("#term-close").onclick = closeTerm;
 $("#term-open").onclick = () => {
   closeTerm();
+  $("#term-hint").hidden = true;
   const box = $("#term-box");
   box.hidden = false;
   term = new Terminal({
@@ -928,7 +981,7 @@ async function loadPorts() {
   }
   box.replaceChildren();
   if (!items.length) {
-    box.append(el("span", { class: "muted" }, "Nothing listening besides SSH. Vibe code something below, then hit Refresh."));
+    box.append(el("span", { class: "muted" }, "Nothing listening besides SSH yet. Switch to the Agent tab and ask it to build & start something, then hit Refresh."));
   } else {
     box.append(...items);
   }
@@ -937,7 +990,7 @@ async function loadPorts() {
 // ---- agent ----
 $("#a-run").onclick = async () => {
   const prompt = $("#a-prompt").value.trim();
-  if (!prompt) { toast("prompt required"); return; }
+  if (!prompt) { toast("Tell the agent what to do first."); return; }
   const out = $("#a-out");
   out.hidden = false;
   out.textContent = "";
@@ -1002,7 +1055,7 @@ async function loadTranscripts() {
   const box = $("#t-list");
   box.replaceChildren();
   if (!list.length) {
-    box.append(el("span", { class: "muted" }, "None yet."));
+    box.append(el("span", { class: "muted" }, "No agent runs yet — each run in this VM is logged here."));
     return;
   }
   for (const t of list) {
