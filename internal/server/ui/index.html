@@ -236,6 +236,8 @@ a.svc:hover { text-decoration: underline; }
 #term-box { height: 380px; background: #000; border: 1px solid var(--black); padding: 5px 0 5px 5px;
   box-shadow: -1px -1px 0 var(--g600), 1px 1px 0 #fff; }
 #term-box .xterm { height: 100%; }
+/* xterm.css defaults to overflow-y:scroll — track shows even with no scrollback */
+#term-box .xterm-viewport { overflow-y: auto !important; }
 td .mono, td.mono { user-select: text; }
 
 /* wizard feedback */
