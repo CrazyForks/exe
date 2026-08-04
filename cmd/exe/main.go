@@ -263,13 +263,7 @@ func cmdServe() error {
 		}()
 	}
 
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	select {
-	case err := <-errc:
-		return err
-	case <-sig:
-		log.Printf("shutting down")
+	shutdown := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		srvMu.Lock()
@@ -279,8 +273,20 @@ func cmdServe() error {
 			sshLn.Close()
 		}
 		srvMu.Unlock()
-		return nil
 	}
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	wait := func() error {
+		select {
+		case err := <-errc:
+			return err
+		case <-sig:
+			log.Printf("shutting down")
+			shutdown()
+			return nil
+		}
+	}
+	return serveWait(srv, wait, shutdown)
 }
 
 func portOf(addr string) string {

@@ -383,52 +383,74 @@ func (s *Server) handleExpose(w http.ResponseWriter, r *http.Request) {
 // handleDaemonRestart restarts the daemon: running VMs are stopped (they
 // live inside this process), a fresh copy of the binary is spawned with
 // EXE_AUTOSTART naming them so it starts them again, and this process
-// exits. Spawn-then-exit rather than exec-in-place: Virtualization.framework
-// keeps non-Go threads alive that wedge syscall.Exec's runtime hooks.
+// exits.
 func (s *Server) handleDaemonRestart(w http.ResponseWriter, r *http.Request) {
-	exePath, err := os.Executable()
-	if err != nil {
+	if _, err := os.Executable(); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	running := s.RunningVMNames(r.Context())
+	writeJSON(w, http.StatusOK, map[string]any{"status": "restarting", "autostart": running})
+	if fl, ok := w.(http.Flusher); ok {
+		fl.Flush()
+	}
+	go s.RestartDaemon(400*time.Millisecond, running) // delay lets the response reach the client
+}
+
+// RunningVMNames returns the names of the VMs currently in the running state.
+func (s *Server) RunningVMNames(ctx context.Context) []string {
 	var running []string
-	if vms, err := s.VMs.List(r.Context()); err == nil {
+	if vms, err := s.VMs.List(ctx); err == nil {
 		for _, v := range vms {
 			if v.State == "running" {
 				running = append(running, v.Name)
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "restarting", "autostart": running})
-	if fl, ok := w.(http.Flusher); ok {
-		fl.Flush()
+	return running
+}
+
+// StopVMs stops the named VMs in parallel and waits for all of them.
+func (s *Server) StopVMs(ctx context.Context, names []string) {
+	var wg sync.WaitGroup
+	for _, name := range names {
+		wg.Add(1)
+		go func(n string) {
+			defer wg.Done()
+			if err := s.VMs.Stop(ctx, n); err != nil {
+				log.Printf("stop %s: %v", n, err)
+			}
+		}(name)
 	}
-	go func() {
-		time.Sleep(400 * time.Millisecond) // let the response reach the client
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		var wg sync.WaitGroup
-		for _, name := range running {
-			wg.Add(1)
-			go func(n string) {
-				defer wg.Done()
-				if err := s.VMs.Stop(ctx, n); err != nil {
-					log.Printf("restart: stop %s: %v", n, err)
-				}
-			}(name)
-		}
-		wg.Wait()
-		cmd := exec.Command(exePath, os.Args[1:]...)
-		cmd.Env = append(os.Environ(), "EXE_AUTOSTART="+strings.Join(running, ","))
-		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-		if err := cmd.Start(); err != nil {
-			log.Printf("restart: spawn failed: %v", err)
-			return
-		}
-		log.Printf("restart: handing over to pid %d (autostart: %s)", cmd.Process.Pid, strings.Join(running, ","))
-		os.Exit(0)
-	}()
+	wg.Wait()
+}
+
+// RestartDaemon stops the named VMs, spawns a fresh copy of the binary with
+// EXE_AUTOSTART naming them so the new process starts them again, and exits
+// this process. Spawn-then-exit rather than exec-in-place:
+// Virtualization.framework keeps non-Go threads alive that wedge
+// syscall.Exec's runtime hooks. Called from the restart API and the macOS
+// menu bar icon.
+func (s *Server) RestartDaemon(delay time.Duration, running []string) {
+	exePath, err := os.Executable()
+	if err != nil {
+		log.Printf("restart: %v", err)
+		return
+	}
+	time.Sleep(delay)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	s.StopVMs(ctx, running)
+	cmd := exec.Command(exePath, os.Args[1:]...)
+	cmd.Env = append(os.Environ(), "EXE_AUTOSTART="+strings.Join(running, ","))
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		log.Printf("restart: spawn failed: %v", err)
+		return
+	}
+	log.Printf("restart: handing over to pid %d (autostart: %s)", cmd.Process.Pid, strings.Join(running, ","))
+	os.Exit(0)
 }
 
 // handleTailscale reports this host's Tailscale IPv4, detected as a CGNAT

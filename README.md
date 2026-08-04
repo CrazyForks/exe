@@ -81,6 +81,11 @@ http://127.0.0.1:7777). It can:
 If `api_token` is set, paste it into the token field in the header (stored in
 localStorage). Bind `listen` to your Tailscale IP to use the UI from your phone.
 
+While `exe serve` runs it also puts an icon in the macOS menu bar: **Open Web
+UI**, **Restart Daemon** (running VMs are brought back automatically), and
+**Quit exe** (asks for confirmation, then shuts down running VMs and the
+daemon). In headless sessions (ssh) the daemon runs without the icon.
+
 ## Configuration (~/.exe/config.json)
 
 | key | meaning |
