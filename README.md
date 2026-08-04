@@ -5,6 +5,8 @@ macOS (Apple Virtualization.framework), vibecode inside them with models from
 Ollama Cloud, and publish any VM port to a real HTTPS subdomain through your
 Cloudflare Tunnel.
 
+![The web UI — a Mac OS 9 Platinum desktop: sortable VM list and an SSH terminal into a VM](docs/screenshot.png)
+
 ```
 phone/laptop ──► exe API (bind to Tailscale IP)
                     │
