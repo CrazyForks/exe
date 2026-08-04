@@ -163,6 +163,55 @@ func (c *Client) ZoneName(ctx context.Context) (string, error) {
 	return "", nil
 }
 
+// DeleteDNS removes the CNAME record(s) for fqdn, if any.
+func (c *Client) DeleteDNS(ctx context.Context, fqdn string) error {
+	q := url.Values{"type": {"CNAME"}, "name": {fqdn}}
+	var existing []struct {
+		ID string `json:"id"`
+	}
+	if err := c.do(ctx, "GET", "/zones/"+c.ZoneID+"/dns_records?"+q.Encode(), nil, &existing); err != nil {
+		return err
+	}
+	for _, rec := range existing {
+		if err := c.do(ctx, "DELETE", "/zones/"+c.ZoneID+"/dns_records/"+rec.ID, nil, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RemoveIngress drops the tunnel ingress rule for fqdn, preserving the rest.
+func (c *Client) RemoveIngress(ctx context.Context, fqdn string) error {
+	var got struct {
+		Config map[string]any `json:"config"`
+	}
+	path := "/accounts/" + c.AccountID + "/cfd_tunnel/" + c.TunnelID + "/configurations"
+	if err := c.do(ctx, "GET", path, nil, &got); err != nil {
+		return err
+	}
+	if got.Config == nil {
+		return nil
+	}
+	rules, ok := got.Config["ingress"].([]any)
+	if !ok {
+		return nil
+	}
+	kept := make([]any, 0, len(rules))
+	for _, r := range rules {
+		if m, isMap := r.(map[string]any); isMap {
+			if h, _ := m["hostname"].(string); h == fqdn {
+				continue
+			}
+		}
+		kept = append(kept, r)
+	}
+	if len(kept) == len(rules) {
+		return nil
+	}
+	got.Config["ingress"] = kept
+	return c.do(ctx, "PUT", path, map[string]any{"config": got.Config}, nil)
+}
+
 // EnsureDNS upserts a proxied CNAME fqdn -> <tunnel>.cfargotunnel.com.
 func (c *Client) EnsureDNS(ctx context.Context, fqdn string) error {
 	content := c.TunnelID + ".cfargotunnel.com"

@@ -11,13 +11,13 @@
 :root {
   --bg: #f6f7f9; --panel: #ffffff; --text: #1a1d21; --muted: #6b7280;
   --border: #e2e5ea; --accent: #2563eb; --accent-text: #ffffff;
-  --green: #16a34a; --red: #dc2626; --amber: #d97706;
+  --green: #16a34a; --red: #dc2626; --amber: #d97706; --yellow: #eab308;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0f1115; --panel: #171a21; --text: #e5e7eb; --muted: #9ca3af;
-    --border: #262b36; --accent: #3b82f6;
+    --border: #262b36; --accent: #3b82f6; --yellow: #facc15;
   }
 }
 * { box-sizing: border-box; }
@@ -472,30 +472,55 @@ async function loadPorts() {
     return;
   }
   const routes = await j("/v1/routes").catch(() => ({}));
+  const publishedBackends = new Set();
+  for (const [host, backend] of Object.entries(routes)) {
+    if (backend.startsWith(`http://${d.ip}:`)) publishedBackends.add(backend);
+  }
   const items = [];
   for (const p of d.ports) {
     const url = `http://${d.ip}:${p.port}/`;
-    const exposeBtn = el("button", { class: "ghost" }, "Expose");
-    exposeBtn.onclick = async () => {
-      exposeBtn.disabled = true;
-      exposeBtn.textContent = "Exposing…";
-      await doExpose(p.port, "");
-      exposeBtn.disabled = false;
-      exposeBtn.textContent = "Expose";
-    };
-    items.push(el("div", { class: "svc-item" },
+    const row = el("div", { class: "svc-item" },
       el("span", { class: "mono" }, ":" + p.port),
       el("span", { class: "muted" }, p.process || ""),
-      el("a", { href: url, target: "_blank", rel: "noopener", class: "mono", style: "margin-left:auto" }, url + " ↗"),
-      exposeBtn));
+      el("a", { href: url, target: "_blank", rel: "noopener", class: "mono", style: "margin-left:auto" }, url + " ↗"));
+    if (!publishedBackends.has(`http://${d.ip}:${p.port}`)) {
+      const exposeBtn = el("button", { class: "ghost" }, "Expose");
+      exposeBtn.onclick = async () => {
+        exposeBtn.disabled = true;
+        exposeBtn.textContent = "Exposing…";
+        await doExpose(p.port, "");
+        exposeBtn.disabled = false;
+        exposeBtn.textContent = "Expose";
+      };
+      row.append(exposeBtn);
+    }
+    items.push(row);
   }
   for (const [host, backend] of Object.entries(routes)) {
-    if (backend.startsWith(`http://${d.ip}:`)) {
-      items.push(el("div", { class: "svc-item" },
-        el("span", { class: "chip running" }, "published"),
-        el("a", { href: "https://" + host, target: "_blank", rel: "noopener", class: "mono" }, "https://" + host + " ↗"),
-        el("span", { class: "muted mono", style: "margin-left:auto" }, "→ " + backend)));
-    }
+    if (!backend.startsWith(`http://${d.ip}:`)) continue;
+    const un = el("button", { class: "ghost danger" }, "Unexpose");
+    un.onclick = async () => {
+      if (!un.classList.contains("armed")) {
+        un.classList.add("armed");
+        un.textContent = "Sure?";
+        setTimeout(() => { un.classList.remove("armed"); un.textContent = "Unexpose"; }, 3000);
+        return;
+      }
+      un.disabled = true;
+      un.textContent = "Removing…";
+      try {
+        const res = await j("/v1/routes/" + encodeURIComponent(host), { method: "DELETE" });
+        let msg = host + " unpublished";
+        for (const wmsg of res.warnings || []) msg += " — ⚠ " + wmsg;
+        toast(msg);
+      } catch (e) { toast(e.message); }
+      loadPorts().catch(() => {});
+    };
+    items.push(el("div", { class: "svc-item" },
+      el("span", { class: "chip running" }, "published"),
+      el("a", { href: "https://" + host, target: "_blank", rel: "noopener", class: "mono" }, "https://" + host + " ↗"),
+      el("span", { class: "muted mono", style: "margin-left:auto" }, "→ " + backend),
+      un));
   }
   box.replaceChildren();
   if (!items.length) {
@@ -848,7 +873,7 @@ async function cfHeartbeat(force) {
   try {
     const h = await j("/v1/cloudflare/health" + (force ? "?force=1" : ""));
     cfLast = h;
-    $("#cf-dot-circle").style.background = h.status === "ok" ? "var(--green)" : "var(--amber)";
+    $("#cf-dot-circle").style.background = h.status === "ok" ? "var(--green)" : "var(--yellow)";
     $("#cf-dot").title = h.message || ("Cloudflare status: " + h.status);
   } catch (e) { /* keep last known color */ }
 }

@@ -348,12 +348,40 @@ func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.Proxy.Snapshot())
 }
 
-// handleRouteDelete removes a proxy route. The Cloudflare DNS record and
-// ingress rule, if any, are left in place; the host then 502s at the proxy.
+// handleRouteDelete unpublishes a hostname: proxy route, Cloudflare DNS
+// record, and tunnel ingress rule.
 func (s *Server) handleRouteDelete(w http.ResponseWriter, r *http.Request) {
-	if err := s.Proxy.Remove(r.PathValue("host")); err != nil {
+	cfg := s.Config()
+	host := r.PathValue("host")
+	if err := s.Proxy.Remove(host); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	res := map[string]any{"status": "removed"}
+	var warnings []string
+	cfc := &cf.Client{
+		Token:     cfg.Cloudflare.APIToken,
+		AccountID: cfg.Cloudflare.AccountID,
+		ZoneID:    cfg.Cloudflare.ZoneID,
+		TunnelID:  cfg.Cloudflare.TunnelID,
+		Domain:    cfg.Cloudflare.Domain,
+	}
+	if cfc.Configured() {
+		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+		defer cancel()
+		if err := cfc.DeleteDNS(ctx, host); err != nil {
+			warnings = append(warnings, "dns: "+err.Error())
+		} else {
+			res["dns"] = "removed"
+		}
+		if err := cfc.RemoveIngress(ctx, host); err != nil {
+			warnings = append(warnings, "ingress: "+err.Error())
+		} else {
+			res["ingress"] = "removed"
+		}
+	}
+	if len(warnings) > 0 {
+		res["warnings"] = warnings
+	}
+	writeJSON(w, http.StatusOK, res)
 }

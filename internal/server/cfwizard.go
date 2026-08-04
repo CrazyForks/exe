@@ -41,6 +41,21 @@ func (s *Server) handleCFHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) checkCFHealth(ctx context.Context) map[string]any {
+	res := s.cfProbe(ctx)
+	if res["status"] == "error" {
+		// Cloudflared connectors cycle and the CF API has blips; a single
+		// failed probe shouldn't flip the dot orange for a whole cache TTL.
+		select {
+		case <-ctx.Done():
+			return res
+		case <-time.After(2 * time.Second):
+		}
+		res = s.cfProbe(ctx)
+	}
+	return res
+}
+
+func (s *Server) cfProbe(ctx context.Context) map[string]any {
 	c := s.Config().Cloudflare
 	if c.APIToken == "" || c.AccountID == "" || c.ZoneID == "" || c.TunnelID == "" || c.Domain == "" {
 		return map[string]any{
