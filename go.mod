@@ -7,6 +7,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/kdomanski/iso9660 v0.4.0
 	golang.org/x/crypto v0.54.0
+	golang.org/x/term v0.45.0
 )
 
 require (

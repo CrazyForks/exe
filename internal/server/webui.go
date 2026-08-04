@@ -190,10 +190,13 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 	if old.ProxyListen != nc.ProxyListen {
 		rebinding = append(rebinding, "proxy_listen")
 	}
+	if old.SSHListen != nc.SSHListen {
+		rebinding = append(rebinding, "ssh_listen")
+	}
 	res := map[string]any{"status": "saved"}
 	if len(rebinding) > 0 {
 		if s.OnRebind != nil {
-			s.OnRebind(nc.Listen, nc.ProxyListen)
+			s.OnRebind(nc.Listen, nc.ProxyListen, nc.SSHListen)
 			res["rebinding"] = rebinding
 		} else {
 			restart = append(restart, rebinding...)

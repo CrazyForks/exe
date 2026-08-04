@@ -1104,6 +1104,7 @@ const CONFIG_FIELDS = [
   { group: "Daemon", fields: [
     { path: "listen", hint: "rebinds live on Save — bind a Tailscale IP for remote access" },
     { path: "proxy_listen", hint: "rebinds live on Save" },
+    { path: "ssh_listen", hint: "SSH gate — ssh -p 2222 exe@host (lobby) or <vm>@host; \"off\" disables; rebinds live on Save" },
     { path: "advertise_host", hint: "this Mac as seen from the cloudflared host" },
     { path: "api_token", secret: true },
     { path: "ssh_user", restart: true },

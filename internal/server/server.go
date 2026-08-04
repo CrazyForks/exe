@@ -34,10 +34,10 @@ type Server struct {
 	KeyPath  string
 	StateDir string
 
-	// OnRebind, when set, is called after a config PUT changes listen or
-	// proxy_listen so the daemon can re-bind those listeners in-process —
-	// VMs live in this process and survive.
-	OnRebind func(listen, proxyListen string)
+	// OnRebind, when set, is called after a config PUT changes listen,
+	// proxy_listen or ssh_listen so the daemon can re-bind those listeners
+	// in-process — VMs live in this process and survive.
+	OnRebind func(listen, proxyListen, sshListen string)
 
 	cfg        atomic.Pointer[config.Config]
 	activeRuns sync.Map // transcript id -> struct{}
@@ -137,13 +137,9 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, vms)
 }
 
-func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
+// fillSpec applies the configured defaults to unset VM spec fields.
+func (s *Server) fillSpec(spec *vmm.Spec) {
 	cfg := s.Config()
-	var spec vmm.Spec
-	if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
 	if spec.CPUs <= 0 {
 		spec.CPUs = cfg.DefaultCPUs
 	}
@@ -153,6 +149,15 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if spec.DiskGB <= 0 {
 		spec.DiskGB = cfg.DefaultDiskGB
 	}
+}
+
+func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
+	var spec vmm.Spec
+	if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	s.fillSpec(&spec)
 	info, err := s.VMs.Create(r.Context(), spec)
 	if err != nil {
 		writeErr(w, errCode(err), err)
@@ -210,8 +215,54 @@ func (s *Server) transcriptDir(vm string) string {
 	return filepath.Join(s.StateDir, "vms", vm, "transcripts")
 }
 
-func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
+// agentPrecheck validates a vibecode request and resolves the running VM.
+func (s *Server) agentPrecheck(ctx context.Context, name, prompt string) (*vmm.Info, error) {
 	cfg := s.Config()
+	if strings.TrimSpace(prompt) == "" {
+		return nil, errors.New("prompt is required")
+	}
+	if cfg.Ollama.APIKey == "" && strings.Contains(cfg.Ollama.BaseURL, "ollama.com") {
+		return nil, errors.New("ollama.api_key is not configured (or set OLLAMA_API_KEY)")
+	}
+	return s.runningVM(ctx, name)
+}
+
+// agentRun executes one vibecode run against info's VM, recording a
+// transcript and streaming output through emit.
+func (s *Server) agentRun(ctx context.Context, info *vmm.Info, name, prompt, model string, emit func(string)) error {
+	cfg := s.Config()
+	acfg := agent.Config{
+		BaseURL: cfg.Ollama.BaseURL,
+		APIKey:  cfg.Ollama.APIKey,
+		Model:   cfg.Ollama.Model,
+	}
+	if model != "" {
+		acfg.Model = model
+	}
+	rec, err := transcript.Start(s.transcriptDir(name), prompt, acfg.Model)
+	if err != nil {
+		return err
+	}
+	s.activeRuns.Store(rec.ID(), struct{}{})
+	defer s.activeRuns.Delete(rec.ID())
+	logf := func(format string, args ...any) {
+		line := fmt.Sprintf(format, args...)
+		rec.Append(line)
+		emit(line)
+	}
+	target := sshexec.Target{Host: info.IP, User: cfg.SSHUser, KeyPath: s.KeyPath}
+	logf("[agent] model %s on vm %s (%s)\n", acfg.Model, name, info.IP)
+	runErr := agent.Run(ctx, acfg, target, name, prompt, logf)
+	if runErr != nil {
+		logf("\n[agent] ERROR: %v\n", runErr)
+	} else {
+		logf("\n[agent] done\n")
+	}
+	rec.Finish(runErr)
+	return runErr
+}
+
+func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	var req struct {
 		Prompt string `json:"prompt"`
@@ -221,59 +272,80 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	if strings.TrimSpace(req.Prompt) == "" {
-		writeErr(w, http.StatusBadRequest, errors.New("prompt is required"))
-		return
-	}
-	if cfg.Ollama.APIKey == "" && strings.Contains(cfg.Ollama.BaseURL, "ollama.com") {
-		writeErr(w, http.StatusBadRequest, errors.New("ollama.api_key is not configured (or set OLLAMA_API_KEY)"))
-		return
-	}
-	info, err := s.runningVM(r.Context(), name)
+	info, err := s.agentPrecheck(r.Context(), name, req.Prompt)
 	if err != nil {
 		writeErr(w, http.StatusConflict, err)
 		return
 	}
 
-	acfg := agent.Config{
-		BaseURL: cfg.Ollama.BaseURL,
-		APIKey:  cfg.Ollama.APIKey,
-		Model:   cfg.Ollama.Model,
-	}
-	if req.Model != "" {
-		acfg.Model = req.Model
-	}
-
-	rec, err := transcript.Start(s.transcriptDir(name), req.Prompt, acfg.Model)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	s.activeRuns.Store(rec.ID(), struct{}{})
-	defer s.activeRuns.Delete(rec.ID())
-
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	fl, _ := w.(http.Flusher)
-	logf := func(format string, args ...any) {
-		line := fmt.Sprintf(format, args...)
-		rec.Append(line)
+	s.agentRun(r.Context(), info, name, req.Prompt, req.Model, func(line string) {
 		fmt.Fprint(w, line)
 		if fl != nil {
 			fl.Flush()
 		}
+	})
+}
+
+// exposeVM wires <sub>.<domain> through the local proxy to the VM's port
+// and, when Cloudflare is configured, ensures the DNS record and tunnel
+// ingress rule. The caller validates port and cloudflare.domain first.
+func (s *Server) exposeVM(ctx context.Context, info *vmm.Info, name, sub string, port int) (map[string]any, error) {
+	cfg := s.Config()
+	if sub == "" {
+		sub = name
+	}
+	fqdn := sub + "." + cfg.Cloudflare.Domain
+	backend := "http://" + net.JoinHostPort(info.IP, strconv.Itoa(port))
+	if err := s.Proxy.Set(fqdn, backend); err != nil {
+		return nil, err
 	}
 
-	target := sshexec.Target{Host: info.IP, User: cfg.SSHUser, KeyPath: s.KeyPath}
-	logf("[agent] model %s on vm %s (%s)\n", acfg.Model, name, info.IP)
-	runErr := agent.Run(r.Context(), acfg, target, name, req.Prompt, logf)
-	if runErr != nil {
-		logf("\n[agent] ERROR: %v\n", runErr)
-	} else {
-		logf("\n[agent] done\n")
+	res := map[string]any{
+		"host":    fqdn,
+		"backend": backend,
+		"url":     "https://" + fqdn,
 	}
-	rec.Finish(runErr)
+	var warnings []string
+	cfc := &cf.Client{
+		Token:     cfg.Cloudflare.APIToken,
+		AccountID: cfg.Cloudflare.AccountID,
+		ZoneID:    cfg.Cloudflare.ZoneID,
+		TunnelID:  cfg.Cloudflare.TunnelID,
+		Domain:    cfg.Cloudflare.Domain,
+	}
+	if cfc.Configured() {
+		ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+		defer cancel()
+		if err := cfc.EnsureDNS(ctx, fqdn); err != nil {
+			warnings = append(warnings, "dns: "+err.Error())
+		} else {
+			res["dns"] = "ok"
+		}
+		if cfg.AdvertiseHost == "" {
+			warnings = append(warnings, "advertise_host not set; skipped tunnel ingress update")
+		} else {
+			proxyPort := cfg.ProxyListen
+			if i := strings.LastIndex(proxyPort, ":"); i >= 0 {
+				proxyPort = proxyPort[i+1:]
+			}
+			svc := "http://" + net.JoinHostPort(cfg.AdvertiseHost, proxyPort)
+			if err := cfc.EnsureIngress(ctx, fqdn, svc); err != nil {
+				warnings = append(warnings, "ingress: "+err.Error())
+			} else {
+				res["ingress"] = svc
+			}
+		}
+	} else {
+		warnings = append(warnings, "cloudflare not fully configured; only the local proxy route was added")
+	}
+	if len(warnings) > 0 {
+		res["warnings"] = warnings
+	}
+	return res, nil
 }
 
 func (s *Server) handleExpose(w http.ResponseWriter, r *http.Request) {
@@ -300,57 +372,10 @@ func (s *Server) handleExpose(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, err)
 		return
 	}
-	sub := req.Subdomain
-	if sub == "" {
-		sub = name
-	}
-	fqdn := sub + "." + cfg.Cloudflare.Domain
-	backend := "http://" + net.JoinHostPort(info.IP, strconv.Itoa(req.Port))
-	if err := s.Proxy.Set(fqdn, backend); err != nil {
+	res, err := s.exposeVM(r.Context(), info, name, req.Subdomain, req.Port)
+	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
-	}
-
-	res := map[string]any{
-		"host":    fqdn,
-		"backend": backend,
-		"url":     "https://" + fqdn,
-	}
-	var warnings []string
-	cfc := &cf.Client{
-		Token:     cfg.Cloudflare.APIToken,
-		AccountID: cfg.Cloudflare.AccountID,
-		ZoneID:    cfg.Cloudflare.ZoneID,
-		TunnelID:  cfg.Cloudflare.TunnelID,
-		Domain:    cfg.Cloudflare.Domain,
-	}
-	if cfc.Configured() {
-		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
-		defer cancel()
-		if err := cfc.EnsureDNS(ctx, fqdn); err != nil {
-			warnings = append(warnings, "dns: "+err.Error())
-		} else {
-			res["dns"] = "ok"
-		}
-		if cfg.AdvertiseHost == "" {
-			warnings = append(warnings, "advertise_host not set; skipped tunnel ingress update")
-		} else {
-			proxyPort := cfg.ProxyListen
-			if i := strings.LastIndex(proxyPort, ":"); i >= 0 {
-				proxyPort = proxyPort[i+1:]
-			}
-			svc := "http://" + net.JoinHostPort(cfg.AdvertiseHost, proxyPort)
-			if err := cfc.EnsureIngress(ctx, fqdn, svc); err != nil {
-				warnings = append(warnings, "ingress: "+err.Error())
-			} else {
-				res["ingress"] = svc
-			}
-		}
-	} else {
-		warnings = append(warnings, "cloudflare not fully configured; only the local proxy route was added")
-	}
-	if len(warnings) > 0 {
-		res["warnings"] = warnings
 	}
 	writeJSON(w, http.StatusOK, res)
 }
@@ -428,14 +453,12 @@ func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.Proxy.Snapshot())
 }
 
-// handleRouteDelete unpublishes a hostname: proxy route, Cloudflare DNS
-// record, and tunnel ingress rule.
-func (s *Server) handleRouteDelete(w http.ResponseWriter, r *http.Request) {
+// removeRoute unpublishes a hostname: proxy route, Cloudflare DNS record,
+// and tunnel ingress rule.
+func (s *Server) removeRoute(ctx context.Context, host string) (map[string]any, error) {
 	cfg := s.Config()
-	host := r.PathValue("host")
 	if err := s.Proxy.Remove(host); err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
+		return nil, err
 	}
 	res := map[string]any{"status": "removed"}
 	var warnings []string
@@ -447,7 +470,7 @@ func (s *Server) handleRouteDelete(w http.ResponseWriter, r *http.Request) {
 		Domain:    cfg.Cloudflare.Domain,
 	}
 	if cfc.Configured() {
-		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		defer cancel()
 		if err := cfc.DeleteDNS(ctx, host); err != nil {
 			warnings = append(warnings, "dns: "+err.Error())
@@ -462,6 +485,15 @@ func (s *Server) handleRouteDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(warnings) > 0 {
 		res["warnings"] = warnings
+	}
+	return res, nil
+}
+
+func (s *Server) handleRouteDelete(w http.ResponseWriter, r *http.Request) {
+	res, err := s.removeRoute(r.Context(), r.PathValue("host"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, res)
 }

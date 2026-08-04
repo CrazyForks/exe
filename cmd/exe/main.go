@@ -47,6 +47,10 @@ Usage:
   exe expose <name> -port N [-sub name]    publish https://<sub>.<domain> -> VM port
   exe unexpose <host>                      remove a proxy route
   exe routes                               show proxy routes
+
+The daemon also speaks SSH on :2222 (config ssh_listen):
+  ssh -p 2222 exe@<mac>     lobby: ls / new / rm / code / expose ... (--json for scripts)
+  ssh -p 2222 <vm>@<mac>    full SSH into the VM (scp, sftp, -L/-R; auto-starts it)
 `
 
 func main() {
@@ -122,6 +126,10 @@ func cmdServe() error {
 		return err
 	}
 	srv := server.New(cfg, mgr, px, privKey, stateDir)
+	gate, err := server.NewSSHGate(srv)
+	if err != nil {
+		return err
+	}
 
 	if ie, ok := mgr.(vmm.ImageEnsurer); ok {
 		go func() {
@@ -153,10 +161,50 @@ func cmdServe() error {
 	if err != nil {
 		return err
 	}
-	var srvMu sync.Mutex // guards apiSrv/proxySrv/cur* across rebinds and shutdown
+	var srvMu sync.Mutex // guards apiSrv/proxySrv/sshLn/cur* across rebinds and shutdown
 	curListen, curProxy := cfg.Listen, cfg.ProxyListen
 	apiSrv := serveHTTP(apiHandler, apiLn)
 	proxySrv := serveHTTP(proxyHandler, proxyLn)
+
+	// SSH gate (lobby + direct VM ssh); its sessions live independently of
+	// the listener, so a rebind only swaps where new connections land.
+	serveSSH := func(ln net.Listener) {
+		go func() {
+			if err := gate.Serve(ln); err != nil {
+				errc <- err
+			}
+		}()
+	}
+	var sshLn net.Listener
+	curSSH := cfg.SSHListen
+	if config.SSHEnabled(curSSH) {
+		if sshLn, err = listenRetry(curSSH, 15*time.Second); err != nil {
+			return err
+		}
+		serveSSH(sshLn)
+	}
+	rebindSSH := func(next string) {
+		if next == curSSH {
+			return
+		}
+		if sshLn != nil {
+			sshLn.Close()
+			sshLn = nil
+		}
+		if config.SSHEnabled(next) {
+			ln, lerr := listenRetry(next, 10*time.Second)
+			if lerr != nil {
+				log.Printf("rebind ssh to %s failed: %v — ssh gate is down until the address is fixed", next, lerr)
+			} else {
+				sshLn = ln
+				serveSSH(ln)
+				log.Printf("ssh gate rebound to %s", next)
+			}
+		} else {
+			log.Printf("ssh gate disabled")
+		}
+		curSSH = next
+	}
 
 	// Re-bind a listener in place when listen/proxy_listen change via
 	// PUT /v1/config — VMs live in this process and are untouched.
@@ -181,16 +229,20 @@ func cmdServe() error {
 		}
 		*hs = serveHTTP(h, ln)
 	}
-	srv.OnRebind = func(newListen, newProxy string) {
+	srv.OnRebind = func(newListen, newProxy, newSSH string) {
 		go func() {
 			time.Sleep(300 * time.Millisecond) // let the PUT response drain first
 			srvMu.Lock()
 			defer srvMu.Unlock()
 			rebindOne("api", &apiSrv, apiHandler, &curListen, newListen)
 			rebindOne("proxy", &proxySrv, proxyHandler, &curProxy, newProxy)
+			rebindSSH(newSSH)
 		}()
 	}
 	log.Printf("exe daemon: API http://%s, proxy %s, state %s", displayAddr(cfg.Listen), cfg.ProxyListen, stateDir)
+	if config.SSHEnabled(curSSH) {
+		log.Printf("ssh gate on %s: `ssh -p %s exe@<this host>` is the lobby, `ssh -p %s <vm>@<this host>` is the VM", curSSH, portOf(curSSH), portOf(curSSH))
+	}
 	log.Printf("note: VMs run inside this process and power off when it exits")
 
 	// After an in-place restart (POST /v1/daemon/restart) the previous
@@ -223,9 +275,19 @@ func cmdServe() error {
 		srvMu.Lock()
 		apiSrv.Shutdown(ctx)
 		proxySrv.Shutdown(ctx)
+		if sshLn != nil {
+			sshLn.Close()
+		}
 		srvMu.Unlock()
 		return nil
 	}
+}
+
+func portOf(addr string) string {
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		return addr[i+1:]
+	}
+	return addr
 }
 
 func listenRetry(addr string, wait time.Duration) (net.Listener, error) {

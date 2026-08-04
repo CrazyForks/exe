@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 const defaultImageURLTmpl = "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-%s.raw"
@@ -35,6 +36,10 @@ type Config struct {
 	// AdvertiseHost is the address of THIS machine as reachable from the
 	// cloudflared tunnel server (LAN IP or Tailscale IP).
 	AdvertiseHost string `json:"advertise_host"`
+	// SSHListen is the SSH gate address (default ":2222"):
+	// `ssh -p 2222 exe@host` is the lobby, `ssh -p 2222 <vm>@host` is full
+	// SSH into the VM. Set to "off" to disable.
+	SSHListen string `json:"ssh_listen"`
 	// APIToken, when set, is required as a Bearer token on every API call.
 	APIToken string `json:"api_token"`
 
@@ -71,6 +76,7 @@ func Default() *Config {
 	return &Config{
 		Listen:          "127.0.0.1:7777",
 		ProxyListen:     ":8090",
+		SSHListen:       ":2222",
 		SSHUser:         "dev",
 		ImageURL:        fmt.Sprintf(defaultImageURLTmpl, arch),
 		DefaultCPUs:     2,
@@ -81,6 +87,16 @@ func Default() *Config {
 			Model:   "glm-5.2",
 		},
 	}
+}
+
+// SSHEnabled reports whether addr enables the SSH gate; empty, "off",
+// "none" and "disabled" turn it off.
+func SSHEnabled(addr string) bool {
+	switch strings.ToLower(strings.TrimSpace(addr)) {
+	case "", "off", "none", "disabled":
+		return false
+	}
+	return true
 }
 
 // Load reads config.json over the defaults; secrets can also come from

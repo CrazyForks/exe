@@ -47,3 +47,30 @@ func Ensure(stateDir string) (privPath, authorizedKey string, err error) {
 	}
 	return privPath, authorizedKey, nil
 }
+
+// EnsureHostKey generates (once) and loads the host key the SSH gate
+// presents on ssh_listen.
+func EnsureHostKey(stateDir string) (ssh.Signer, error) {
+	dir := filepath.Join(stateDir, "ssh")
+	p := filepath.Join(dir, "host_ed25519")
+	if b, err := os.ReadFile(p); err == nil {
+		return ssh.ParsePrivateKey(b)
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "exe-host")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(p, pem.EncodeToMemory(block), 0o600); err != nil {
+		return nil, err
+	}
+	return ssh.NewSignerFromKey(priv)
+}
