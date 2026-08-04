@@ -7,16 +7,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -128,13 +131,85 @@ func cmdServe() error {
 		}()
 	}
 
-	apiSrv := &http.Server{Addr: cfg.Listen, Handler: srv.Handler()}
-	proxySrv := &http.Server{Addr: cfg.ProxyListen, Handler: px.Handler()}
-	errc := make(chan error, 2)
-	go func() { errc <- apiSrv.ListenAndServe() }()
-	go func() { errc <- proxySrv.ListenAndServe() }()
+	apiHandler := srv.Handler()
+	proxyHandler := px.Handler()
+	errc := make(chan error, 4)
+	serveHTTP := func(h http.Handler, ln net.Listener) *http.Server {
+		hs := &http.Server{Handler: h}
+		go func() {
+			if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errc <- err
+			}
+		}()
+		return hs
+	}
+	// Retry binds briefly: after POST /v1/daemon/restart the parent process
+	// is still releasing these ports while we come up.
+	apiLn, err := listenRetry(cfg.Listen, 15*time.Second)
+	if err != nil {
+		return err
+	}
+	proxyLn, err := listenRetry(cfg.ProxyListen, 15*time.Second)
+	if err != nil {
+		return err
+	}
+	var srvMu sync.Mutex // guards apiSrv/proxySrv/cur* across rebinds and shutdown
+	curListen, curProxy := cfg.Listen, cfg.ProxyListen
+	apiSrv := serveHTTP(apiHandler, apiLn)
+	proxySrv := serveHTTP(proxyHandler, proxyLn)
+
+	// Re-bind a listener in place when listen/proxy_listen change via
+	// PUT /v1/config — VMs live in this process and are untouched.
+	rebindOne := func(name string, hs **http.Server, h http.Handler, cur *string, next string) {
+		if next == *cur {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		(*hs).Shutdown(ctx)
+		cancel()
+		ln, err := listenRetry(next, 10*time.Second)
+		if err != nil {
+			log.Printf("rebind %s to %s failed: %v — keeping %s", name, next, err, *cur)
+			ln, err = listenRetry(*cur, 10*time.Second)
+			if err != nil {
+				errc <- fmt.Errorf("rebind %s: lost both %s and %s: %v", name, next, *cur, err)
+				return
+			}
+		} else {
+			*cur = next
+			log.Printf("%s rebound to %s", name, *cur)
+		}
+		*hs = serveHTTP(h, ln)
+	}
+	srv.OnRebind = func(newListen, newProxy string) {
+		go func() {
+			time.Sleep(300 * time.Millisecond) // let the PUT response drain first
+			srvMu.Lock()
+			defer srvMu.Unlock()
+			rebindOne("api", &apiSrv, apiHandler, &curListen, newListen)
+			rebindOne("proxy", &proxySrv, proxyHandler, &curProxy, newProxy)
+		}()
+	}
 	log.Printf("exe daemon: API http://%s, proxy %s, state %s", displayAddr(cfg.Listen), cfg.ProxyListen, stateDir)
 	log.Printf("note: VMs run inside this process and power off when it exits")
+
+	// After an in-place restart (POST /v1/daemon/restart) the previous
+	// process hands us the VMs that were running so we bring them back.
+	if names := os.Getenv("EXE_AUTOSTART"); names != "" {
+		os.Unsetenv("EXE_AUTOSTART")
+		go func() {
+			for _, name := range strings.Split(names, ",") {
+				if name == "" {
+					continue
+				}
+				if _, err := mgr.Start(context.Background(), name); err != nil {
+					log.Printf("autostart %s: %v", name, err)
+				} else {
+					log.Printf("autostart %s: running", name)
+				}
+			}
+		}()
+	}
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
@@ -145,9 +220,25 @@ func cmdServe() error {
 		log.Printf("shutting down")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		srvMu.Lock()
 		apiSrv.Shutdown(ctx)
 		proxySrv.Shutdown(ctx)
+		srvMu.Unlock()
 		return nil
+	}
+}
+
+func listenRetry(addr string, wait time.Duration) (net.Listener, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			return ln, nil
+		}
+		if !strings.Contains(err.Error(), "address already in use") || time.Now().After(deadline) {
+			return nil, err
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
 }
 

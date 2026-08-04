@@ -176,8 +176,6 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 
 	var restart []string
 	for _, f := range []struct{ name, oldV, newV string }{
-		{"listen", old.Listen, nc.Listen},
-		{"proxy_listen", old.ProxyListen, nc.ProxyListen},
 		{"ssh_user", old.SSHUser, nc.SSHUser},
 		{"image_url", old.ImageURL, nc.ImageURL},
 	} {
@@ -185,7 +183,22 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 			restart = append(restart, f.name)
 		}
 	}
+	var rebinding []string
+	if old.Listen != nc.Listen {
+		rebinding = append(rebinding, "listen")
+	}
+	if old.ProxyListen != nc.ProxyListen {
+		rebinding = append(rebinding, "proxy_listen")
+	}
 	res := map[string]any{"status": "saved"}
+	if len(rebinding) > 0 {
+		if s.OnRebind != nil {
+			s.OnRebind(nc.Listen, nc.ProxyListen)
+			res["rebinding"] = rebinding
+		} else {
+			restart = append(restart, rebinding...)
+		}
+	}
 	if restart != nil {
 		res["restart_required"] = restart
 	}

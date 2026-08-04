@@ -412,14 +412,12 @@ td .mono, td.mono { user-select: text; }
       <div class="stripe"></div><button class="tbox zoom"></button><button class="tbox shade"></button></div>
     <div class="win-frame">
       <div class="win-body">
-        <div class="row" style="justify-content:space-between">
-          <span class="muted">~/.exe/config.json — fields marked &#42; need a daemon restart</span>
-          <button class="ghost sm" id="wiz-start">Cloudflare Setup Wizard…</button>
-        </div>
-        <div id="cfg-form"></div>
-        <div class="row" style="margin-top:14px">
+        <div class="muted" style="margin-bottom:10px">~/.exe/config.json — fields marked &#42; need a daemon restart, everything else hot-reloads on Save.</div>
+        <div class="tabbar" id="cfg-tabs"></div>
+        <div class="tabpanel" id="cfg-form"></div>
+        <div class="row" style="margin-top:12px">
+          <span class="muted" id="cfg-status" style="flex:1"></span>
           <button class="btn" id="cfg-save">Save</button>
-          <span class="muted" id="cfg-status"></span>
         </div>
       </div>
     </div>
@@ -1100,14 +1098,14 @@ async function loadTranscripts() {
 // ---- config ----
 const CONFIG_FIELDS = [
   { group: "Daemon", fields: [
-    { path: "listen", restart: true, hint: "bind Tailscale IP for remote access" },
-    { path: "proxy_listen", restart: true },
+    { path: "listen", hint: "rebinds live on Save — bind a Tailscale IP for remote access" },
+    { path: "proxy_listen", hint: "rebinds live on Save" },
     { path: "advertise_host", hint: "this Mac as seen from the cloudflared host" },
     { path: "api_token", secret: true },
     { path: "ssh_user", restart: true },
     { path: "image_url", restart: true },
   ]},
-  { group: "VM defaults", fields: [
+  { group: "VM Defaults", fields: [
     { path: "default_cpus", num: true },
     { path: "default_memory_mb", num: true },
     { path: "default_disk_gb", num: true },
@@ -1128,16 +1126,49 @@ const CONFIG_FIELDS = [
 const getPath = (o, p) => p.split(".").reduce((a, k) => (a == null ? a : a[k]), o);
 const setPath = (o, p, v) => { const ks = p.split("."); const last = ks.pop(); let t = o; for (const k of ks) { t[k] = t[k] || {}; t = t[k]; } t[last] = v; };
 let loadedConfig = null;
+let cfgActiveTab = 0;
 function openConfigWin() {
   openWin("#win-config");
   loadConfig().catch(e => toast(e.message));
 }
+function showCfgPane(i) {
+  cfgActiveTab = i;
+  document.querySelectorAll("#cfg-tabs .tab").forEach((t, idx) => t.classList.toggle("active", idx === i));
+  document.querySelectorAll("#cfg-form .pane").forEach((p, idx) => { p.hidden = idx !== i; });
+}
 async function loadConfig() {
   loadedConfig = await j("/v1/config");
-  const form = $("#cfg-form");
-  form.replaceChildren();
-  for (const g of CONFIG_FIELDS) {
-    form.append(el("h3", { style: "margin:14px 0 8px; font-size:11px; border-bottom:1px solid #aaa; padding-bottom:2px" }, g.group));
+  const bar = $("#cfg-tabs");
+  const panel = $("#cfg-form");
+  bar.replaceChildren();
+  panel.replaceChildren();
+  CONFIG_FIELDS.forEach((g, i) => {
+    bar.append(el("div", { class: "tab" + (i === cfgActiveTab ? " active" : ""), onclick: () => showCfgPane(i) }, g.group));
+    const pane = el("div", { class: "pane" });
+    pane.hidden = i !== cfgActiveTab;
+    if (g.group === "Cloudflare") {
+      pane.append(el("div", { class: "row", style: "justify-content:flex-end; margin-bottom:8px" },
+        el("button", { class: "ghost sm", onclick: () => wizOpen(false) }, "Cloudflare Setup Wizard…")));
+    }
+    if (g.group === "Daemon") {
+      const tools = el("div", { class: "row", style: "justify-content:flex-end; margin-bottom:8px" });
+      const rb = el("button", { class: "ghost sm" }, "Restart Daemon…");
+      rb.onclick = () => daemonRestart(rb);
+      tools.append(rb);
+      pane.append(tools);
+      j("/v1/tailscale").then(ts => {
+        if (!ts.detected) return;
+        const b = el("button", { class: "ghost sm", title: "Set listen to " + ts.ip + " (Tailscale)" }, "Bind to Tailscale IP");
+        b.onclick = () => {
+          const inp = document.getElementById("cfg-listen");
+          const port = (inp.value.match(/:(\d+)\s*$/) || [null, "7777"])[1];
+          inp.value = ts.ip + ":" + port;
+          inp.focus();
+          toast("listen set to " + inp.value + " — click Save to rebind. This page at " + location.host + " may stop responding after that.");
+        };
+        tools.prepend(b);
+      }).catch(() => {});
+    }
     const grid = el("div", { class: "grid" });
     for (const f of g.fields) {
       const val = getPath(loadedConfig, f.path);
@@ -1146,25 +1177,71 @@ async function loadConfig() {
         type: f.secret ? "password" : (f.num ? "number" : "text"),
         value: val == null ? "" : String(val),
       });
+      // inside a group tab the "ollama." / "cloudflare." prefix is redundant
+      const label = f.path.includes(".") ? f.path.split(".").pop() : f.path;
       const field = el("div", { class: "field" },
-        el("label", { for: "cfg-" + f.path }, f.path + (f.restart ? " *" : "")), input);
+        el("label", { for: "cfg-" + f.path }, label + (f.restart ? " *" : "")), input);
       if (f.hint) field.append(el("div", { class: "hint" }, f.hint));
       grid.append(field);
     }
-    form.append(grid);
-  }
+    pane.append(grid);
+    panel.append(pane);
+  });
   // populate placeholders elsewhere in the UI
   $("#a-model").placeholder = (loadedConfig.ollama && loadedConfig.ollama.model) || "model";
   $("#c-cpus").placeholder = loadedConfig.default_cpus || "cpus";
   $("#c-mem").placeholder = loadedConfig.default_memory_mb || "mem MB";
   $("#c-disk").placeholder = loadedConfig.default_disk_gb || "disk GB";
 }
+async function daemonRestart(btn) {
+  if (!btn.classList.contains("armed")) {
+    btn.classList.add("armed");
+    btn.textContent = "Sure? VMs restart too";
+    setTimeout(() => { btn.classList.remove("armed"); btn.textContent = "Restart Daemon…"; }, 3500);
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = "Restarting…";
+  try {
+    await api("/v1/daemon/restart", { method: "POST", json: {} });
+  } catch (e) {
+    toast(e.message);
+    btn.disabled = false;
+    btn.classList.remove("armed");
+    btn.textContent = "Restart Daemon…";
+    return;
+  }
+  toast("Daemon restarting…");
+  const t0 = Date.now();
+  let back = false;
+  while (Date.now() - t0 < 30000) {
+    await new Promise(r => setTimeout(r, 700));
+    try {
+      const r2 = await fetch("/healthz", { cache: "no-store" });
+      if (r2.ok) { back = true; break; }
+    } catch (e) { /* still down */ }
+  }
+  if (back) {
+    toast("Daemon is back — previously running VMs are starting again.");
+    loadVMs._last = null;
+    loadVMs().catch(() => {});
+    loadConfig().catch(() => {});
+    cfHeartbeat(true);
+  } else {
+    toast("Daemon didn't come back within 30s — check `exe serve` in the terminal.");
+    btn.disabled = false;
+    btn.classList.remove("armed");
+    btn.textContent = "Restart Daemon…";
+  }
+}
 $("#cfg-save").onclick = async () => {
   if (!loadedConfig) return;
   const nc = JSON.parse(JSON.stringify(loadedConfig));
   for (const g of CONFIG_FIELDS) {
     for (const f of g.fields) {
-      const raw = $("#cfg-" + f.path).value;
+      // getElementById, not querySelector: ids like cfg-ollama.base_url
+      // contain dots that a selector would parse as class names
+      const raw = document.getElementById("cfg-" + f.path).value;
       setPath(nc, f.path, f.num ? (parseInt(raw, 10) || 0) : raw);
     }
   }
@@ -1173,7 +1250,8 @@ $("#cfg-save").onclick = async () => {
     const res = await j("/v1/config", { method: "PUT", json: nc });
     loadedConfig = nc;
     let msg = "saved";
-    if (res.restart_required) msg += " — restart `exe serve` for: " + res.restart_required.join(", ");
+    if (res.rebinding) msg += " — " + res.rebinding.join(" & ") + " rebinding now (reload the page if it moved)";
+    if (res.restart_required) msg += " — click Restart Daemon… to apply: " + res.restart_required.join(", ");
     $("#cfg-status").textContent = msg;
     toast(msg);
   } catch (e) { toast(e.message); }
@@ -1213,7 +1291,6 @@ function wizOpen(fresh) {
   wizRender();
 }
 function wizClose() { $("#wiz-overlay").hidden = true; }
-$("#wiz-start").onclick = () => wizOpen(false);
 $("#wiz-x").onclick = wizClose;
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;

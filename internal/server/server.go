@@ -6,13 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"exe/internal/agent"
@@ -29,6 +33,11 @@ type Server struct {
 	Proxy    *proxy.Proxy
 	KeyPath  string
 	StateDir string
+
+	// OnRebind, when set, is called after a config PUT changes listen or
+	// proxy_listen so the daemon can re-bind those listeners in-process —
+	// VMs live in this process and survive.
+	OnRebind func(listen, proxyListen string)
 
 	cfg        atomic.Pointer[config.Config]
 	activeRuns sync.Map // transcript id -> struct{}
@@ -68,6 +77,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/cloudflare/health", s.handleCFHealth)
 	mux.HandleFunc("GET /v1/config", s.handleConfigGet)
 	mux.HandleFunc("PUT /v1/config", s.handleConfigPut)
+	mux.HandleFunc("POST /v1/daemon/restart", s.handleDaemonRestart)
+	mux.HandleFunc("GET /v1/tailscale", s.handleTailscale)
 	mux.HandleFunc("GET /v1/routes", s.handleRoutes)
 	mux.HandleFunc("DELETE /v1/routes/{host}", s.handleRouteDelete)
 	mux.Handle("GET /ui/", uiStatic)
@@ -340,6 +351,75 @@ func (s *Server) handleExpose(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(warnings) > 0 {
 		res["warnings"] = warnings
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// handleDaemonRestart restarts the daemon: running VMs are stopped (they
+// live inside this process), a fresh copy of the binary is spawned with
+// EXE_AUTOSTART naming them so it starts them again, and this process
+// exits. Spawn-then-exit rather than exec-in-place: Virtualization.framework
+// keeps non-Go threads alive that wedge syscall.Exec's runtime hooks.
+func (s *Server) handleDaemonRestart(w http.ResponseWriter, r *http.Request) {
+	exePath, err := os.Executable()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	var running []string
+	if vms, err := s.VMs.List(r.Context()); err == nil {
+		for _, v := range vms {
+			if v.State == "running" {
+				running = append(running, v.Name)
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "restarting", "autostart": running})
+	if fl, ok := w.(http.Flusher); ok {
+		fl.Flush()
+	}
+	go func() {
+		time.Sleep(400 * time.Millisecond) // let the response reach the client
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		var wg sync.WaitGroup
+		for _, name := range running {
+			wg.Add(1)
+			go func(n string) {
+				defer wg.Done()
+				if err := s.VMs.Stop(ctx, n); err != nil {
+					log.Printf("restart: stop %s: %v", n, err)
+				}
+			}(name)
+		}
+		wg.Wait()
+		cmd := exec.Command(exePath, os.Args[1:]...)
+		cmd.Env = append(os.Environ(), "EXE_AUTOSTART="+strings.Join(running, ","))
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := cmd.Start(); err != nil {
+			log.Printf("restart: spawn failed: %v", err)
+			return
+		}
+		log.Printf("restart: handing over to pid %d (autostart: %s)", cmd.Process.Pid, strings.Join(running, ","))
+		os.Exit(0)
+	}()
+}
+
+// handleTailscale reports this host's Tailscale IPv4, detected as a CGNAT
+// (100.64.0.0/10) address on a local interface — no tailscale CLI needed.
+func (s *Server) handleTailscale(w http.ResponseWriter, r *http.Request) {
+	res := map[string]any{"detected": false}
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		_, cgnat, _ := net.ParseCIDR("100.64.0.0/10")
+		for _, a := range addrs {
+			if ipn, ok := a.(*net.IPNet); ok {
+				if ip4 := ipn.IP.To4(); ip4 != nil && cgnat.Contains(ip4) {
+					res = map[string]any{"detected": true, "ip": ip4.String()}
+					break
+				}
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, res)
 }
