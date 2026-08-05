@@ -802,6 +802,7 @@ function focusWin(w) {
   w.style.zIndex = zTop;
   // modals keep their hardcoded .front — only desktop windows trade focus
   document.querySelectorAll("#desktop .window").forEach(x => x.classList.toggle("front", x === w));
+  winSave();
 }
 function openWin(sel) {
   const w = typeof sel === "string" ? $(sel) : sel;
@@ -815,6 +816,7 @@ function closeWin(w) {
   if (w.id === "win-detail") { closeTerm(); currentVM = null; }
   if (w.id === "win-newvm") $("#c-status").textContent = "";
   if (w.id === "win-log") stopLogStream();
+  winSave();
 }
 function closeFrontWindow() {
   const wins = [...document.querySelectorAll("#desktop .window")].filter(w => !w.hidden);
@@ -827,7 +829,7 @@ function initWindow(w) {
   const cb = tb.querySelector(".tbox.close");
   if (cb && !cb.id) cb.addEventListener("click", e => { e.stopPropagation(); closeWin(w); });
   const sb = tb.querySelector(".tbox.shade");
-  if (sb) sb.addEventListener("click", e => { e.stopPropagation(); w.classList.toggle("shaded"); termResize(); });
+  if (sb) sb.addEventListener("click", e => { e.stopPropagation(); w.classList.toggle("shaded"); termResize(); winSave(); });
   const zb = tb.querySelector(".tbox.zoom");
   if (zb) zb.addEventListener("click", e => {
     e.stopPropagation();
@@ -847,6 +849,7 @@ function initWindow(w) {
     if (e.target.closest(".tbox") || w.classList.contains("modal")) return;
     w.classList.toggle("shaded");
     termResize();
+    winSave();
   });
   if (w.classList.contains("modal")) return;
   tb.addEventListener("pointerdown", e => {
@@ -858,19 +861,136 @@ function initWindow(w) {
     // made windows jump down by that much on the first move
     const ox = e.clientX - w.offsetLeft, oy = e.clientY - w.offsetTop;
     const width = w.offsetWidth;
+    winDragging = w;
     const move = ev => {
       w.style.left = Math.min(window.innerWidth - 60, Math.max(60 - width, ev.clientX - ox)) + "px";
       w.style.top = Math.min(window.innerHeight - 46, Math.max(0, ev.clientY - oy)) + "px";
+      winSaveLive();
     };
     const up = () => {
+      winDragging = null;
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      winSave();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   });
 }
 document.querySelectorAll(".window").forEach(initWindow);
+
+// ---- window layout: persist + cross-browser sync ----
+// The whole desktop layout (per-window geometry, stacking, shade, and which
+// document windows are open) is one JSON snapshot of the DOM. It is cached
+// in localStorage for instant restore, PUT to the daemon, and fanned out to
+// every other connected browser over /v1/ui/events (SSE) — so dragging a
+// window here moves it there. Snapshots are last-write-wins; because each
+// save re-reads the DOM, concurrent editors converge.
+const WIN_CLIENT = Math.random().toString(36).slice(2) + Date.now().toString(36);
+// windows whose open/closed state is restored and synced; win-detail needs a
+// current VM and the dialogs are transient, so those only keep geometry
+const WIN_SYNC_OPEN = new Set(["win-vms", "win-config", "win-log", "win-chat", "win-trash"]);
+const WIN_OPENERS = { "win-log": () => openLogWin(), "win-chat": () => openChatWin(), "win-config": () => openConfigWin() };
+let winApplying = false; // applying a stored/remote snapshot — don't echo it back
+let winDragging = null;  // window under the local pointer — remote moves lose
+let winRev = 0;
+
+function winSnapshot() {
+  const st = {};
+  document.querySelectorAll("#desktop .window").forEach(w => {
+    // style.*, not offset*: hidden windows are display:none, which reads 0
+    st[w.id] = {
+      l: parseInt(w.style.left) || 0, t: parseInt(w.style.top) || 0,
+      w: parseInt(w.style.width) || w.offsetWidth,
+      z: +w.style.zIndex || 0,
+      open: !w.hidden, shaded: w.classList.contains("shaded"),
+    };
+  });
+  st["win-log"].h = parseInt($("#log-out").style.height) || $("#log-out").offsetHeight || 380;
+  return st;
+}
+function applyWinState(st) {
+  if (!st) return;
+  winApplying = true;
+  try {
+    // pass 1: open/close (openers bump z and .front; geometry fixes that after)
+    for (const [id, v] of Object.entries(st)) {
+      const w = document.getElementById(id);
+      if (!w || !WIN_SYNC_OPEN.has(id)) continue;
+      if (v.open && w.hidden) (WIN_OPENERS[id] || (() => openWin(w)))();
+      else if (!v.open && !w.hidden) closeWin(w);
+    }
+    // pass 2: geometry + stacking, clamped so title bars stay reachable
+    let maxZ = 0;
+    for (const [id, v] of Object.entries(st)) {
+      const w = document.getElementById(id);
+      if (!w || w === winDragging) continue;
+      const width = v.w || w.offsetWidth || 220;
+      if (v.w) w.style.width = Math.min(window.innerWidth - 24, v.w) + "px";
+      if (v.l !== undefined) w.style.left = Math.min(window.innerWidth - 60, Math.max(60 - width, v.l)) + "px";
+      if (v.t !== undefined) w.style.top = Math.min(window.innerHeight - 46, Math.max(0, v.t)) + "px";
+      if (v.z) { w.style.zIndex = v.z; maxZ = Math.max(maxZ, v.z); }
+      w.classList.toggle("shaded", !!v.shaded);
+      if (id === "win-log" && v.h) $("#log-out").style.height = Math.max(96, Math.min(window.innerHeight - 170, v.h)) + "px";
+    }
+    zTop = Math.max(zTop, maxZ);
+    const wins = [...document.querySelectorAll("#desktop .window")].filter(x => !x.hidden);
+    wins.sort((a, b) => (+b.style.zIndex || 0) - (+a.style.zIndex || 0));
+    document.querySelectorAll("#desktop .window").forEach(x => x.classList.toggle("front", x === wins[0]));
+    termResize();
+  } finally { winApplying = false; }
+}
+
+let winSaveT = null, winPushAt = 0;
+function winPush() {
+  const st = winSnapshot();
+  localStorage.setItem("exe_winstate", JSON.stringify(st));
+  j("/v1/ui/state", { method: "PUT", json: { client: WIN_CLIENT, state: st } })
+    .then(r => { winRev = Math.max(winRev, r.rev || 0); })
+    .catch(() => {}); // daemon away — localStorage still has it
+}
+function winSave() {
+  if (winApplying) return;
+  clearTimeout(winSaveT);
+  winSaveT = setTimeout(winPush, 250);
+}
+// mid-drag: leading-edge throttle so the move streams to other browsers,
+// with the trailing debounce catching the final resting spot
+function winSaveLive() {
+  if (winApplying) return;
+  const now = performance.now();
+  if (now - winPushAt >= 150) { winPushAt = now; winPush(); }
+  winSave();
+}
+
+let winES = null;
+function winSubscribe() {
+  if (winES) winES.close();
+  const tok = tokenInput.value ? "?token=" + encodeURIComponent(tokenInput.value) : "";
+  winES = new EventSource("/v1/ui/events" + tok);
+  winES.onmessage = e => {
+    let ev;
+    try { ev = JSON.parse(e.data); } catch (err) { return; }
+    const stale = (ev.rev || 0) <= winRev;
+    winRev = Math.max(winRev, ev.rev || 0);
+    if (ev.client === WIN_CLIENT || stale || !ev.state) return;
+    localStorage.setItem("exe_winstate", JSON.stringify(ev.state));
+    applyWinState(ev.state);
+  };
+}
+tokenInput.addEventListener("change", () => { if (winES) winSubscribe(); });
+function winRestore() {
+  let cached = null;
+  try { cached = JSON.parse(localStorage.getItem("exe_winstate") || "null"); } catch (e) {}
+  if (cached) applyWinState(cached); else openWin("#win-vms");
+  j("/v1/ui/state").then(r => {
+    winRev = r.rev || 0;
+    if (r.state) {
+      localStorage.setItem("exe_winstate", JSON.stringify(r.state));
+      applyWinState(r.state);
+    }
+  }).catch(() => {}).finally(winSubscribe);
+}
 
 // ---- menus ----
 let openMenuEl = null;
@@ -1313,14 +1433,18 @@ $("#log-grow").addEventListener("pointerdown", e => {
   focusWin(w);
   const sw = w.offsetWidth, sh = out.offsetHeight, sx = e.clientX, sy = e.clientY;
   const stick = out.scrollHeight - out.scrollTop - out.clientHeight < 4;
+  winDragging = w;
   const move = ev => {
     w.style.width = Math.max(380, Math.min(window.innerWidth - 40, sw + ev.clientX - sx)) + "px";
     out.style.height = Math.max(96, Math.min(window.innerHeight - 170, sh + ev.clientY - sy)) + "px";
     if (stick) out.scrollTop = out.scrollHeight;
+    winSaveLive();
   };
   const up = () => {
+    winDragging = null;
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
+    winSave();
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
@@ -1986,7 +2110,7 @@ setInterval(() => { if (!document.hidden) cfHeartbeat(false); }, 30000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) cfHeartbeat(false); });
 
 // ---- boot ----
-openWin("#win-vms");
+winRestore();
 renderVMHead();
 loadVMs().catch(e => toast(e.message));
 loadConfig().catch(() => {});

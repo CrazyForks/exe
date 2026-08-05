@@ -59,6 +59,9 @@ type Server struct {
 	chatStatKey string
 	chatStatRes map[string]any
 	chatLocks   sync.Map // session id -> *sync.Mutex
+
+	// Shared web UI window layout (see uistate.go).
+	ui uiState
 }
 
 func New(cfg *config.Config, vms vmm.Manager, px *proxy.Proxy, keyPath, stateDir string) *Server {
@@ -99,6 +102,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/routes", s.handleRoutes)
 	mux.HandleFunc("DELETE /v1/routes/{host}", s.handleRouteDelete)
 	mux.HandleFunc("GET /v1/logs", s.handleLogs)
+	mux.HandleFunc("GET /v1/ui/state", s.handleUIStateGet)
+	mux.HandleFunc("PUT /v1/ui/state", s.handleUIStatePut)
+	mux.HandleFunc("GET /v1/ui/events", s.handleUIStateEvents)
 	mux.Handle("GET /ui/", uiStatic)
 	mux.HandleFunc("GET /", s.handleUI)
 	return s.auth(mux)
