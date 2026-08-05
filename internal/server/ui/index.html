@@ -125,6 +125,9 @@ a { color: #202a87; text-decoration: underline; }
 .statusbar { border-top: 1px solid var(--black); background: var(--g300);
   box-shadow: inset 1px 1px 0 rgba(255,255,255,.6), inset -1px -1px 0 #aaa;
   padding: 3px 8px; font-size: 11px; color: #333; display: flex; align-items: center; gap: 12px; }
+/* OS 9 button-to-button spacing is 8px (sampled from Extensions Manager) */
+.statusbar button + button { margin-left: -4px; }
+td.actions button + button { margin-left: 8px; }
 
 /* modal dialogs */
 .overlay { position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,.15);
@@ -160,20 +163,29 @@ a { color: #202a87; text-decoration: underline; }
 
 /* ---------- controls (macthemes.garden pixel bevels) ---------- */
 button { font: inherit; cursor: default; }
+/* Push buttons, verified against a real OS 9 Extensions Manager capture:
+   20px outer height (1px border + 2px bevel + 14px text line), 13px side
+   padding, 12px Charcoal, 8px between adjacent buttons. The 4-layer inset
+   bevel below matches the sampled rows exactly: K | ddd | fff top-left,
+   face | aaa | 777 | K bottom-right. */
 button.btn, button.ghost {
   background: var(--g300); color: var(--black);
   border: 1px solid var(--black); border-radius: 3px;
-  padding: 3px 12px; font-size: 11px; font-weight: bold;
+  padding: 2px 13px; font-size: 12px; line-height: 14px; font-weight: bold;
   box-shadow: inset 1px 1px 0 var(--g300), inset -1px -1px 0 #777,
     inset 2px 2px 0 #fff, inset -2px -2px 0 #aaa;
 }
-button.btn { outline: 2px solid var(--black); outline-offset: 1px; border-radius: 4px; }
+/* OS 9 draws the black ring only around a dialog's default button; window
+   content buttons are plain (Extensions Manager's Duplicate Set… has none) */
+.window.modal .btn, #win-newvm .btn, #win-token .btn {
+  outline: 2px solid var(--black); outline-offset: 1px; border-radius: 4px; }
 button.btn:active, button.ghost:active {
   background: #666; color: #fff;
   box-shadow: inset 1px 1px 0 #444, inset -1px -1px 0 #888,
     inset 2px 2px 0 #555, inset -2px -2px 0 #777; }
-button.btn:disabled, button.ghost:disabled { color: #9d9d9d; border-color: #9d9d9d;
-  background: var(--g300); box-shadow: none; outline-color: #9d9d9d; }
+/* Disabled, sampled from OS 9: dead flat — no bevel, 888 border, 777 text */
+button.btn:disabled, button.ghost:disabled { color: #777; border-color: #888;
+  background: var(--g300); box-shadow: none; outline-color: #888; }
 button.ghost.danger { color: #7a1010; }
 button.ghost.armed { background: var(--red); color: #fff;
   box-shadow: inset 1px 1px 0 #e88, inset -1px -1px 0 #911; }
@@ -189,10 +201,9 @@ textarea { width: 100%; min-height: 64px; resize: vertical; font-family: var(--m
 select { padding: 2px 4px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
 .row:last-child { margin-bottom: 0; }
-/* field + primary-button rows: bottom-align, lifting ringed buttons so their
-   outline (3px past the border) lines up optically with the input bottoms */
+/* field + primary-button rows: bottom-align the button with the inputs */
 .row.actions { align-items: flex-end; }
-.row.actions .btn { margin-bottom: 2px; margin-left: auto; }
+.row.actions .btn { margin-left: auto; }
 .field label { display: block; font-size: 11px; color: #222; margin-bottom: 3px; }
 .field input { width: 100%; }
 .field .hint { font-size: 10.5px; color: #7a4b00; margin-top: 2px; }
@@ -325,7 +336,6 @@ td .mono, td.mono { user-select: text; }
 .chat-hint { color: #777; text-align: center; padding: 40px 30px 0; }
 .chat-inrow { display: flex; gap: 8px; align-items: flex-end; }
 .chat-inrow textarea { flex: 1; min-height: 46px; }
-.chat-inrow .btn { margin-bottom: 2px; }
 
 /* wizard feedback */
 .wiz-fb { border: 1px solid; padding: 7px 10px; font-size: 11.5px; white-space: pre-wrap; }
@@ -374,6 +384,30 @@ td .mono, td.mono { user-select: text; }
   background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="8" height="14" shape-rendering="crispEdges"><rect x="0" y="3" width="1" height="1" fill="%23ccccff"/><rect x="0" y="4" width="1" height="6" fill="%239999ff"/><rect x="1" y="4" width="1" height="7" fill="%23000066"/><rect x="2" y="3" width="1" height="1" fill="%23ccccff"/><rect x="2" y="4" width="1" height="6" fill="%239999ff"/><rect x="3" y="4" width="1" height="7" fill="%23000066"/><rect x="4" y="3" width="1" height="1" fill="%23ccccff"/><rect x="4" y="4" width="1" height="6" fill="%239999ff"/><rect x="5" y="4" width="1" height="7" fill="%23000066"/><rect x="6" y="3" width="1" height="1" fill="%23ccccff"/><rect x="6" y="4" width="1" height="6" fill="%239999ff"/><rect x="7" y="4" width="1" height="7" fill="%23000066"/></svg>') center no-repeat,
     linear-gradient(to bottom, #9999ff 0 1px, #6666cc 1px 13px, #333399 13px 14px);
   box-shadow: inset 1px 0 0 #9999ff, inset -1px 0 0 #333399; }
+/* Thumb at its start end, sampled from OS 9: the thumb's leading black
+   border merges into the frame line above/left of the bar — a single black
+   line, with the cap row directly under it. The cap moves onto the border
+   row and the duplicate inner cap goes away. Elements start unscrolled, so
+   this is the default; a delegated scroll listener adds .scrolled-y/.scrolled-x
+   once scrolled away from the origin, restoring the normal black border. */
+:not(.scrolled-y)::-webkit-scrollbar-thumb:vertical {
+  border-top-color: #ccccff; box-shadow: inset 0 -1px 0 #6666cc; }
+:not(.scrolled-y)::-webkit-scrollbar-thumb:vertical:active {
+  border-top-color: #9999ff; box-shadow: inset 0 -1px 0 #333399; }
+:not(.scrolled-x)::-webkit-scrollbar-thumb:horizontal {
+  border-left-color: #ccccff; box-shadow: inset -1px 0 0 #6666cc; }
+:not(.scrolled-x)::-webkit-scrollbar-thumb:horizontal:active {
+  border-left-color: #9999ff; box-shadow: inset -1px 0 0 #333399; }
+/* Same merge at the far end, where the thumb parks against the arrow
+   buttons: the button's border supplies the single black line. */
+.at-y-end::-webkit-scrollbar-thumb:vertical {
+  border-bottom-color: #6666cc; box-shadow: inset 0 1px 0 #ccccff; }
+.at-y-end::-webkit-scrollbar-thumb:vertical:active {
+  border-bottom-color: #333399; box-shadow: inset 0 1px 0 #9999ff; }
+.at-x-end::-webkit-scrollbar-thumb:horizontal {
+  border-right-color: #6666cc; box-shadow: inset 1px 0 0 #ccccff; }
+.at-x-end::-webkit-scrollbar-thumb:horizontal:active {
+  border-right-color: #333399; box-shadow: inset 1px 0 0 #9999ff; }
 ::-webkit-scrollbar-button { display: block; width: 16px; height: 16px;
   background: #ddd; border: 1px solid var(--black);
   box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #bbb;
@@ -386,6 +420,11 @@ td .mono, td.mono { user-select: text; }
   background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="4" height="8" shape-rendering="crispEdges"><path fill="black" d="M0 3h1v2h-1z M1 2h1v4h-1z M2 1h1v6h-1z M3 0h1v8h-1z"/></svg>'); }
 ::-webkit-scrollbar-button:horizontal:increment {
   background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="4" height="8" shape-rendering="crispEdges"><path fill="black" d="M0 0h1v8h-1z M1 1h1v6h-1z M2 2h1v4h-1z M3 3h1v2h-1z"/></svg>'); }
+/* Pressed arrow button, sampled from OS 9: the face sinks to 777 and the
+   bevel inverts a level darker (555 top-left, 999 bottom-right); the
+   glyph stays black. */
+::-webkit-scrollbar-button:active { background-color: #777;
+  box-shadow: inset 1px 1px 0 #555, inset -1px -1px 0 #999; }
 /* OS 9 Smart Scrolling default: both arrows stacked at the end. All four
    button slots render once sized; hide the two at the start. */
 ::-webkit-scrollbar-button:vertical:start:decrement,
@@ -663,7 +702,7 @@ td .mono, td.mono { user-select: text; }
           </div>
         </div>
         <div class="muted" id="c-status" style="min-height:16px"></div>
-        <div class="row" style="justify-content:flex-end; margin:10px 0 2px">
+        <div class="row" style="justify-content:flex-end; gap:11px; margin:10px 0 2px">
           <button class="ghost" id="c-cancel">Cancel</button>
           <button class="btn" id="c-go">Create</button>
         </div>
@@ -1099,6 +1138,19 @@ chatIcon.addEventListener("click", e => { e.stopPropagation(); chatIcon.classLis
 chatIcon.addEventListener("dblclick", () => openChatWin());
 document.addEventListener("mousedown", e => { if (!e.target.closest("#chat-icon")) chatIcon.classList.remove("sel"); });
 
+// OS 9 scrollbar end-merge: thumbs render with the leading border merged into
+// the frame (the unscrolled default); flag elements once they scroll away so
+// CSS can restore the thumb's own black border. Capture phase — scroll
+// events don't bubble from overflow elements.
+document.addEventListener("scroll", e => {
+  const el = e.target;
+  if (!(el instanceof Element)) return;
+  el.classList.toggle("scrolled-y", el.scrollTop >= 1);
+  el.classList.toggle("scrolled-x", el.scrollLeft >= 1);
+  el.classList.toggle("at-y-end", el.scrollTop >= 1 && el.scrollTop >= el.scrollHeight - el.clientHeight - 1);
+  el.classList.toggle("at-x-end", el.scrollLeft >= 1 && el.scrollLeft >= el.scrollWidth - el.clientWidth - 1);
+}, { capture: true, passive: true });
+
 // ---- vm list ----
 let currentVM = null;
 let lastVMs = [];
@@ -1162,7 +1214,7 @@ function renderVMList(rawVMs) {
     } else {
       actions.append(el("button", { class: "ghost sm", onclick: e => { e.stopPropagation(); vmAction(vm.name, "start"); } }, "Start"));
     }
-    const del = el("button", { class: "ghost sm danger", style: "margin-left:6px" }, "Delete");
+    const del = el("button", { class: "ghost sm danger" }, "Delete");
     del.onclick = async e => {
       e.stopPropagation();
       if (!del.classList.contains("armed")) {
