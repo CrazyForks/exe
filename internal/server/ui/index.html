@@ -225,7 +225,11 @@ th:last-child { border-right: none; }
 th.sorted { background: #888; border-top-color: #111;
   box-shadow: inset 1px 0 0 #555, inset 0 1px 0 #555,
     inset 0 -1px 0 #444, inset 0 -2px 0 #aaa; }
-.sortarrow { font-size: 8px; margin-left: 5px; vertical-align: 1px; }
+/* fixed box: ▲ and ▼ render a hair different in width, and the hidden
+   placeholder in unsorted headers must match the live arrow exactly */
+.sortarrow { font-size: 8px; margin-left: 5px; vertical-align: 1px;
+  display: inline-block; width: 9px; text-align: center; }
+.sortarrow.ph { visibility: hidden; }
 /* actions column: shrink to its buttons, never wrap them */
 td.actions { white-space: nowrap; width: 1%; text-align: right; }
 td { padding: 4px 9px; border-bottom: 1px solid #efefef; }
@@ -1181,7 +1185,10 @@ function renderVMHead() {
       class: c.key === vmSort.key ? "sorted" : "",
       onclick: () => setVMSort(c.key, c.key === vmSort.key ? -vmSort.dir : 1),
     }, c.label);
-    if (c.key === vmSort.key) th.append(el("span", { class: "sortarrow" }, vmSort.dir === 1 ? "▲" : "▼"));
+    // every header carries an arrow, invisible on unsorted columns — the
+    // reserved space keeps column widths stable when the sort moves
+    const active = c.key === vmSort.key;
+    th.append(el("span", { class: "sortarrow" + (active ? "" : " ph") }, active && vmSort.dir === -1 ? "▼" : "▲"));
     tr.append(th);
   }
   tr.append(el("th", {})); // actions
