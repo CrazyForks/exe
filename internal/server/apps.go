@@ -1,0 +1,291 @@
+// Desktop apps and the shared workspace.
+//
+// ~/.exe/apps/<Name>/ is an app bundle: app.json (metadata) plus index.html,
+// served straight from disk at /apps/<Name>/ and opened by the web UI in a
+// desktop window — editing an app is live on the next reload, no rebuild.
+// Each app's private state lives OUTSIDE the served tree in
+// ~/.exe/appdata/<Name>/, reachable only through the token-guarded
+// /v1/apps/{app}/data API, so no static-serving path can ever leak it and the
+// daemon can jail every app to its own directory. ~/.exe/workspace/ is the
+// explicitly-shared area (agents and apps exchange files there) behind
+// /v1/workspace.
+package server
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"io/fs"
+	"log"
+	"mime"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+)
+
+func (s *Server) appsDir() string      { return filepath.Join(s.StateDir, "apps") }
+func (s *Server) workspaceDir() string { return filepath.Join(s.StateDir, "workspace") }
+func (s *Server) appDataDir(app string) string {
+	return filepath.Join(s.StateDir, "appdata", app)
+}
+
+// ensureStateDirs creates the writable state layout on startup.
+func (s *Server) ensureStateDirs() {
+	for _, d := range []string{s.appsDir(), s.workspaceDir(), filepath.Join(s.StateDir, "appdata")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			log.Printf("state dir %s: %v", d, err)
+		}
+	}
+}
+
+var appNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$`)
+
+func validAppName(name string) bool {
+	return appNameRE.MatchString(name) && !strings.Contains(name, "..")
+}
+
+type appWindow struct {
+	Width  int `json:"width,omitempty"`
+	Height int `json:"height,omitempty"`
+}
+
+type appMeta struct {
+	Name   string     `json:"name"`
+	Title  string     `json:"title"`
+	Icon   string     `json:"icon,omitempty"`
+	Window *appWindow `json:"window,omitempty"`
+}
+
+// loadAppMeta reads one bundle's app.json; a folder only counts as an app
+// when the metadata parses and index.html exists.
+func (s *Server) loadAppMeta(name string) (*appMeta, error) {
+	dir := filepath.Join(s.appsDir(), name)
+	b, err := os.ReadFile(filepath.Join(dir, "app.json"))
+	if err != nil {
+		return nil, err
+	}
+	m := &appMeta{}
+	if err := json.Unmarshal(b, m); err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(filepath.Join(dir, "index.html")); err != nil {
+		return nil, errors.New("no index.html")
+	}
+	m.Name = name // the folder is the identity; app.json cannot claim another
+	if strings.TrimSpace(m.Title) == "" {
+		m.Title = name
+	}
+	if m.Icon != "" && !filepath.IsLocal(m.Icon) {
+		m.Icon = ""
+	}
+	return m, nil
+}
+
+func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
+	entries, err := os.ReadDir(s.appsDir())
+	if err != nil && !os.IsNotExist(err) {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	apps := []*appMeta{}
+	for _, e := range entries {
+		if !e.IsDir() || !validAppName(e.Name()) {
+			continue
+		}
+		m, err := s.loadAppMeta(e.Name())
+		if err != nil {
+			log.Printf("apps: skipping %s: %v", e.Name(), err)
+			continue
+		}
+		apps = append(apps, m)
+	}
+	sort.Slice(apps, func(i, j int) bool { return apps[i].Title < apps[j].Title })
+	writeJSON(w, http.StatusOK, apps)
+}
+
+// appStatic serves app bundles from disk at /apps/<name>/. os.DirFS is
+// rooted, so requests cannot escape the apps folder; app data lives in a
+// separate tree this handler can never reach.
+func (s *Server) appStatic() http.Handler {
+	return http.StripPrefix("/apps/", http.FileServerFS(os.DirFS(s.appsDir())))
+}
+
+// ---- scoped file stores (per-app data + shared workspace) ----
+
+// fileMax caps a single stored file.
+const fileMax = 10 << 20
+
+// scopedPath resolves rel inside root, rejecting absolute paths and any
+// traversal outside root.
+func scopedPath(root, rel string) (string, error) {
+	rel = filepath.FromSlash(rel)
+	if rel == "" || !filepath.IsLocal(rel) {
+		return "", errors.New("invalid path")
+	}
+	return filepath.Join(root, rel), nil
+}
+
+// appDataRoot validates the app name against an installed bundle and returns
+// the app's private data directory.
+func (s *Server) appDataRoot(name string) (string, error) {
+	if !validAppName(name) {
+		return "", errors.New("invalid app name")
+	}
+	if fi, err := os.Stat(filepath.Join(s.appsDir(), name)); err != nil || !fi.IsDir() {
+		return "", errors.New("no such app")
+	}
+	return s.appDataDir(name), nil
+}
+
+type storedFile struct {
+	Path     string    `json:"path"`
+	Size     int64     `json:"size"`
+	Modified time.Time `json:"modified"`
+}
+
+func handleFileList(w http.ResponseWriter, root string) {
+	files := []storedFile{}
+	filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return nil
+		}
+		files = append(files, storedFile{Path: filepath.ToSlash(rel), Size: info.Size(), Modified: info.ModTime()})
+		return nil
+	})
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	writeJSON(w, http.StatusOK, map[string]any{"files": files})
+}
+
+func handleFileGet(w http.ResponseWriter, root, rel string) {
+	p, err := scopedPath(root, rel)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeErr(w, http.StatusNotFound, errors.New("not found"))
+		} else {
+			writeErr(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	ct := mime.TypeByExtension(filepath.Ext(p))
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ct)
+	// Data is app/agent-written content: keep browsers from rendering it as
+	// a page on this origin (fetch() by apps is unaffected).
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", "attachment")
+	w.Write(b)
+}
+
+func handleFilePut(w http.ResponseWriter, r *http.Request, root, rel string) {
+	p, err := scopedPath(root, rel)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, fileMax+1))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if len(body) > fileMax {
+		writeErr(w, http.StatusRequestEntityTooLarge, errors.New("file exceeds 10 MB"))
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	// Atomic-ish: temp file in the same directory, then rename over.
+	tmp, err := os.CreateTemp(filepath.Dir(p), ".put-*")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if _, err := tmp.Write(body); err == nil {
+		err = tmp.Close()
+	} else {
+		tmp.Close()
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), p)
+	}
+	if err != nil {
+		os.Remove(tmp.Name())
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "path": rel, "size": len(body)})
+}
+
+func handleFileDelete(w http.ResponseWriter, root, rel string) {
+	p, err := scopedPath(root, rel)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := os.Remove(p); err != nil {
+		if os.IsNotExist(err) {
+			writeErr(w, http.StatusNotFound, errors.New("not found"))
+		} else {
+			writeErr(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// ---- route handlers ----
+
+func (s *Server) withAppData(w http.ResponseWriter, r *http.Request, fn func(root string)) {
+	root, err := s.appDataRoot(r.PathValue("app"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	fn(root)
+}
+
+func (s *Server) handleAppDataList(w http.ResponseWriter, r *http.Request) {
+	s.withAppData(w, r, func(root string) { handleFileList(w, root) })
+}
+func (s *Server) handleAppDataGet(w http.ResponseWriter, r *http.Request) {
+	s.withAppData(w, r, func(root string) { handleFileGet(w, root, r.PathValue("path")) })
+}
+func (s *Server) handleAppDataPut(w http.ResponseWriter, r *http.Request) {
+	s.withAppData(w, r, func(root string) { handleFilePut(w, r, root, r.PathValue("path")) })
+}
+func (s *Server) handleAppDataDelete(w http.ResponseWriter, r *http.Request) {
+	s.withAppData(w, r, func(root string) { handleFileDelete(w, root, r.PathValue("path")) })
+}
+
+func (s *Server) handleWorkspaceList(w http.ResponseWriter, r *http.Request) {
+	handleFileList(w, s.workspaceDir())
+}
+func (s *Server) handleWorkspaceGet(w http.ResponseWriter, r *http.Request) {
+	handleFileGet(w, s.workspaceDir(), r.PathValue("path"))
+}
+func (s *Server) handleWorkspacePut(w http.ResponseWriter, r *http.Request) {
+	handleFilePut(w, r, s.workspaceDir(), r.PathValue("path"))
+}
+func (s *Server) handleWorkspaceDelete(w http.ResponseWriter, r *http.Request) {
+	handleFileDelete(w, s.workspaceDir(), r.PathValue("path"))
+}

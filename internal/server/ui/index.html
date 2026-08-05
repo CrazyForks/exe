@@ -75,6 +75,9 @@ a { color: #202a87; text-decoration: underline; }
   color: #fff; text-shadow: 1px 1px 1px #000; padding: 0 4px; font-size: 11px; }
 .dicon.sel svg { filter: brightness(.55) saturate(1.3) drop-shadow(1px 1px 0 rgba(0,0,0,.4)); }
 .dicon.sel .lbl { background: var(--hl); text-shadow: none; }
+.dicon img { width: 34px; height: 34px; image-rendering: pixelated;
+  filter: drop-shadow(1px 1px 0 rgba(0,0,0,.4)); }
+.dicon.sel img { filter: brightness(.55) saturate(1.3) drop-shadow(1px 1px 0 rgba(0,0,0,.4)); }
 #trash-icon { position: absolute; bottom: 16px; right: 14px; z-index: 1; }
 #chat-icon { position: absolute; bottom: 96px; right: 14px; z-index: 1; }
 
@@ -116,6 +119,9 @@ a { color: #202a87; text-decoration: underline; }
 .window:not(.front) .title { color: #777; }
 .window.shaded { padding-bottom: 1px; }
 .window.shaded .win-frame { display: none; }
+/* desktop app windows (~/.exe/apps) host their UI in an iframe set into the
+   sunken frame; the app page brings its own Platinum styling */
+.app-frame { display: block; border: 0; width: 100%; height: 400px; background: var(--g200); }
 
 /* sunken content frame, inset 4px into the platinum chrome */
 .win-frame { margin: 0 4px 4px; border: 1px solid var(--black); background: var(--g300);
@@ -912,6 +918,9 @@ function initWindow(w) {
     if (e.target.closest(".tbox")) return;
     e.preventDefault();
     focusWin(w);
+    // capture the drag's pointer stream on the title bar — otherwise the
+    // pointer escapes into an app window's iframe and the drag freezes
+    try { tb.setPointerCapture(e.pointerId); } catch (err) {}
     // grab offset in #desktop coordinates (offsetLeft/Top) — client rects are
     // viewport-based, and the desktop origin sits 20px lower (menu bar), which
     // made windows jump down by that much on the first move
@@ -972,6 +981,14 @@ function applyWinState(st) {
     // pass 1: open/close (openers bump z and .front; geometry fixes that after)
     for (const [id, v] of Object.entries(st)) {
       const w = document.getElementById(id);
+      if (id.startsWith("win-app-")) {
+        // app windows are created on demand, so this browser may not have
+        // the element yet — openAppWin builds it before pass 2 places it
+        if (v.open && !w) openAppWin(id.slice(8));
+        else if (w && v.open && w.hidden) openWin(w);
+        else if (w && !v.open && !w.hidden) closeWin(w);
+        continue;
+      }
       if (!w || !WIN_SYNC_OPEN.has(id)) continue;
       if (v.open && w.hidden) (WIN_OPENERS[id] || (() => openWin(w)))();
       else if (!v.open && !w.hidden) closeWin(w);
@@ -1078,7 +1095,7 @@ const ACTIONS = {
   about: () => openWin("#win-about"),
   newvm: () => { openWin("#win-newvm"); $("#c-name").focus(); },
   closewin: closeFrontWindow,
-  refresh: () => { loadVMs().then(() => toast("Refreshed")).catch(e => toast(e.message)); },
+  refresh: () => { Promise.all([loadVMs(), loadApps()]).then(() => toast("Refreshed")).catch(e => toast(e.message)); },
   winvms: () => openWin("#win-vms"),
   winchat: () => openChatWin(),
   winconfig: openConfigWin,
@@ -1129,6 +1146,65 @@ function renderIcons(vms) {
     ic.addEventListener("dblclick", () => openVM(vm.name));
     box.append(ic);
   }
+  for (const app of appsList) {
+    const key = "app:" + app.name;
+    const ic = el("div", { class: "dicon" + (selectedIcon === key ? " sel" : ""), title: app.title || app.name });
+    ic.innerHTML = app.icon
+      ? `<img src="/apps/${encodeURIComponent(app.name)}/${app.icon.split("/").map(encodeURIComponent).join("/")}" alt="">`
+      : APP_FALLBACK_ICON;
+    ic.append(el("span", { class: "lbl" }, app.title || app.name));
+    ic.addEventListener("click", e => {
+      e.stopPropagation();
+      selectedIcon = key;
+      box.querySelectorAll(".dicon").forEach(d => d.classList.remove("sel"));
+      ic.classList.add("sel");
+    });
+    ic.addEventListener("dblclick", () => openAppWin(app.name));
+    box.append(ic);
+  }
+}
+
+// ---- desktop apps (folders in ~/.exe/apps with app.json + index.html) ----
+let appsList = [];
+const APP_FALLBACK_ICON = `<svg width="34" height="34" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <path d="M16 2.5 L29.5 16 L16 29.5 L2.5 16 Z" fill="#DAD5CA" stroke="#000"/>
+  <path d="M16 8.5 L23.5 16 L16 23.5 L8.5 16 Z" fill="#9C9AF2" stroke="#000"/>
+</svg>`;
+async function loadApps() {
+  appsList = await j("/v1/apps");
+  renderIcons(lastVMs);
+  // app windows restored from a layout snapshot before the list arrived get
+  // their real title and height once metadata is here
+  for (const a of appsList) {
+    const w = document.getElementById("win-app-" + a.name);
+    if (!w) continue;
+    w.querySelector(".title").textContent = a.title || a.name;
+    if (a.window && a.window.height) w.querySelector(".app-frame").style.height = a.window.height + "px";
+  }
+}
+function openAppWin(name) {
+  const id = "win-app-" + name;
+  let w = document.getElementById(id);
+  if (!w) {
+    const app = appsList.find(a => a.name === name) || {};
+    w = el("div", { class: "window app-window", id });
+    const n = document.querySelectorAll("#desktop .app-window").length;
+    w.style.left = (120 + n * 24) + "px";
+    w.style.top = (70 + n * 20) + "px";
+    w.style.width = ((app.window && app.window.width) || 420) + "px";
+    w.innerHTML = `<div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
+      <div class="title"></div>
+      <div class="stripe"></div><button class="tbox zoom"></button><button class="tbox shade"></button></div>
+      <div class="win-frame"><iframe class="app-frame"></iframe></div>`;
+    w.querySelector(".title").textContent = app.title || name;
+    const fr = w.querySelector(".app-frame");
+    if (app.window && app.window.height) fr.style.height = app.window.height + "px";
+    const tok = tokenInput.value ? "?token=" + encodeURIComponent(tokenInput.value) : "";
+    fr.src = "/apps/" + encodeURIComponent(name) + "/" + tok;
+    $("#desktop").append(w);
+    initWindow(w);
+  }
+  openWin(w);
 }
 $("#desktop").addEventListener("mousedown", e => {
   if (e.target === $("#desktop") || e.target === $("#icons")) {
@@ -2185,6 +2261,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) cfHe
 winRestore();
 renderVMHead();
 loadVMs().catch(e => toast(e.message));
+loadApps().catch(() => {});
 loadConfig().catch(() => {});
 cfHeartbeat(false);
 chatDetect(false);

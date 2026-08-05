@@ -67,6 +67,7 @@ type Server struct {
 func New(cfg *config.Config, vms vmm.Manager, px *proxy.Proxy, keyPath, stateDir string) *Server {
 	s := &Server{VMs: vms, Proxy: px, KeyPath: keyPath, StateDir: stateDir}
 	s.cfg.Store(cfg)
+	s.ensureStateDirs()
 	return s
 }
 
@@ -88,6 +89,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/vms/{name}/terminal", s.handleTerminal)
 	mux.HandleFunc("GET /v1/vms/{name}/transcripts", s.handleTranscripts)
 	mux.HandleFunc("GET /v1/vms/{name}/transcripts/{id}", s.handleTranscript)
+	mux.HandleFunc("GET /v1/apps", s.handleApps)
+	mux.HandleFunc("GET /v1/apps/{app}/data", s.handleAppDataList)
+	mux.HandleFunc("GET /v1/apps/{app}/data/{path...}", s.handleAppDataGet)
+	mux.HandleFunc("PUT /v1/apps/{app}/data/{path...}", s.handleAppDataPut)
+	mux.HandleFunc("DELETE /v1/apps/{app}/data/{path...}", s.handleAppDataDelete)
+	mux.HandleFunc("GET /v1/workspace", s.handleWorkspaceList)
+	mux.HandleFunc("GET /v1/workspace/{path...}", s.handleWorkspaceGet)
+	mux.HandleFunc("PUT /v1/workspace/{path...}", s.handleWorkspacePut)
+	mux.HandleFunc("DELETE /v1/workspace/{path...}", s.handleWorkspaceDelete)
 	mux.HandleFunc("GET /v1/chat/status", s.handleChatStatus)
 	mux.HandleFunc("GET /v1/chat/sessions", s.handleChatSessions)
 	mux.HandleFunc("GET /v1/chat/sessions/{id}", s.handleChatSession)
@@ -105,6 +115,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/ui/state", s.handleUIStateGet)
 	mux.HandleFunc("PUT /v1/ui/state", s.handleUIStatePut)
 	mux.HandleFunc("GET /v1/ui/events", s.handleUIStateEvents)
+	mux.Handle("GET /apps/", s.appStatic())
 	mux.Handle("GET /ui/", uiStatic)
 	mux.HandleFunc("GET /", s.handleUI)
 	return s.auth(mux)
