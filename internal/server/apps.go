@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -279,7 +280,61 @@ func (s *Server) handleAppDataDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWorkspaceList(w http.ResponseWriter, r *http.Request) {
+	// ?dir= switches to a single-directory listing (with folders) for the
+	// desktop's Finder-style Workspace window; the bare form stays the flat
+	// recursive file list that apps already rely on.
+	if r.URL.Query().Has("dir") {
+		handleDirList(w, s.workspaceDir(), r.URL.Query().Get("dir"))
+		return
+	}
 	handleFileList(w, s.workspaceDir())
+}
+
+// dirEntry is one row of a Finder-style folder listing.
+type dirEntry struct {
+	Name     string    `json:"name"`
+	Dir      bool      `json:"dir,omitempty"`
+	Size     int64     `json:"size,omitempty"`
+	Modified time.Time `json:"modified"`
+}
+
+// handleDirList lists one directory level under root (rel "" is the root
+// itself), hiding dotfiles like the classic Finder hides invisibles, plus
+// the volume's free space for the "N items, X available" strip.
+func handleDirList(w http.ResponseWriter, root, rel string) {
+	p := root
+	if rel != "" {
+		var err error
+		if p, err = scopedPath(root, rel); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+	}
+	ents, err := os.ReadDir(p)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, errors.New("no such folder"))
+		return
+	}
+	list := []dirEntry{}
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		list = append(list, dirEntry{Name: e.Name(), Dir: e.IsDir(), Size: info.Size(), Modified: info.ModTime()})
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return strings.ToLower(list[i].Name) < strings.ToLower(list[j].Name)
+	})
+	var free int64
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(p, &st); err == nil {
+		free = int64(st.Bavail) * int64(st.Bsize)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": list, "free": free})
 }
 func (s *Server) handleWorkspaceGet(w http.ResponseWriter, r *http.Request) {
 	handleFileGet(w, s.workspaceDir(), r.PathValue("path"))

@@ -75,7 +75,7 @@ a { color: #202a87; text-decoration: underline; }
   color: #fff; text-shadow: 1px 1px 1px #000; padding: 0 4px; font-size: 11px; }
 .dicon.sel svg { filter: brightness(.55) saturate(1.3) drop-shadow(1px 1px 0 rgba(0,0,0,.4)); }
 .dicon.sel .lbl { background: var(--hl); text-shadow: none; }
-.dicon img { width: 34px; height: 34px; image-rendering: pixelated;
+.dicon img { width: 32px; height: 32px; image-rendering: pixelated;
   filter: drop-shadow(1px 1px 0 rgba(0,0,0,.4)); }
 .dicon.sel img { filter: brightness(.55) saturate(1.3) drop-shadow(1px 1px 0 rgba(0,0,0,.4)); }
 #trash-icon { position: absolute; bottom: 16px; right: 14px; z-index: 1; }
@@ -137,6 +137,36 @@ a { color: #202a87; text-decoration: underline; }
 .window.grow .win-frame::after { content: ""; position: absolute; right: -2px; bottom: -2px;
   width: 17px; height: 2px; background: var(--g400); }
 .grow-box { position: absolute; right: 0; bottom: 0; width: 15px; height: 15px; }
+/* document-window scroller to pair with .grow: flush 15px OS 9 bars whose
+   trailing edge is the .win-frame border itself (the global 16px spec draws
+   its own trailing line and would double it), with the second end arrow as
+   a 14px borderless cell so every corner seam is a single shared line —
+   same adaptation the Todo app carries internally. */
+.doc-scroll { overflow: scroll; }
+.doc-scroll::-webkit-scrollbar { width: 15px; height: 15px; }
+.doc-scroll::-webkit-scrollbar-track:vertical { border-right: 0; }
+.doc-scroll::-webkit-scrollbar-track:horizontal { border-bottom: 0; }
+.doc-scroll::-webkit-scrollbar-thumb:vertical { border-right: 0; }
+.doc-scroll::-webkit-scrollbar-thumb:horizontal { border-bottom: 0; }
+.doc-scroll::-webkit-scrollbar-button:vertical { border-right: 0; }
+.doc-scroll::-webkit-scrollbar-button:horizontal { border-bottom: 0; }
+.doc-scroll::-webkit-scrollbar-button:vertical:end:increment:enabled { height: 14px; border-top: 0; border-bottom: 0; }
+.doc-scroll::-webkit-scrollbar-button:horizontal:end:increment:enabled { width: 14px; border-left: 0; border-right: 0; }
+.doc-scroll::-webkit-scrollbar-button:vertical:disabled { border-right: 0; }
+.doc-scroll::-webkit-scrollbar-button:horizontal:disabled { border-bottom: 0; }
+
+/* Workspace window: Finder icon view over ~/.exe/workspace */
+.finder-status { background: var(--g300); border-bottom: 1px solid var(--black);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.6);
+  text-align: center; font-size: 12px; padding: 4px 8px 3px; }
+.finder-icons { background: #fff; height: 336px; display: flex; flex-wrap: wrap;
+  align-content: flex-start; padding: 10px 0 0 10px; }
+.fitem { width: 120px; height: 64px; flex: none; display: flex; flex-direction: column;
+  align-items: center; gap: 2px; }
+.fitem .lbl { max-width: 116px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px; padding: 0 3px; }
+.fitem.sel svg { filter: brightness(.55) saturate(1.3); }
+.fitem.sel .lbl { background: var(--hl); color: #fff; }
 
 /* sunken content frame, inset 4px into the platinum chrome */
 .win-frame { margin: 0 4px 4px; border: 1px solid var(--black); background: var(--g300);
@@ -523,7 +553,7 @@ td .mono, td.mono { user-select: text; }
   <!-- speech balloon in the same pixel style as the Mac icons; hidden until
        Ollama is detected, like the Windows → Chat menu item -->
   <div class="dicon" id="chat-icon" title="Chat — double-click to talk to your VM cloud" hidden>
-    <svg width="34" height="34" viewBox="0 0 32 32" shape-rendering="crispEdges">
+    <svg width="32" height="32" viewBox="0 0 32 32" shape-rendering="crispEdges">
       <rect x="3.5" y="5.5" width="25" height="15" fill="#DAD5CA" stroke="#000"/>
       <rect x="4.5" y="6.5" width="23" height="2" fill="#EDEAE2"/>
       <path d="M9.5 20.5 v6 l6 -6 z" fill="#DAD5CA" stroke="#000"/>
@@ -533,7 +563,7 @@ td .mono, td.mono { user-select: text; }
     <span class="lbl">Chat</span>
   </div>
   <div class="dicon" id="trash-icon">
-    <svg width="34" height="34" viewBox="0 0 32 32" shape-rendering="crispEdges"><rect x="13.5" y="2.5" width="5" height="2" fill="#C8C3B8" stroke="#000"/><rect x="8.5" y="4.5" width="15" height="3" fill="#D5D0C5" stroke="#000"/><rect x="9.5" y="7.5" width="13" height="21" fill="#CDC8BD" stroke="#000"/><path d="M12.5 10v16M15.5 10v16M18.5 10v16M21.5 10v16" stroke="#8B867B"/></svg>
+    <svg width="32" height="32" viewBox="0 0 32 32" shape-rendering="crispEdges"><rect x="13.5" y="2.5" width="5" height="2" fill="#C8C3B8" stroke="#000"/><rect x="8.5" y="4.5" width="15" height="3" fill="#D5D0C5" stroke="#000"/><rect x="9.5" y="7.5" width="13" height="21" fill="#CDC8BD" stroke="#000"/><path d="M12.5 10v16M15.5 10v16M18.5 10v16M21.5 10v16" stroke="#8B867B"/></svg>
     <span class="lbl">Trash</span>
   </div>
 
@@ -987,9 +1017,11 @@ function winSnapshot() {
       z: +w.style.zIndex || 0,
       open: !w.hidden, shaded: w.classList.contains("shaded"),
     };
-    // app windows are also resizable vertically (grow box → iframe height)
+    // app and Finder windows are also resizable vertically (grow box)
     const fr = w.querySelector(".app-frame");
     if (fr) st[w.id].h = parseInt(fr.style.height) || fr.offsetHeight || 0;
+    const fi = w.querySelector(".finder-icons");
+    if (fi) st[w.id].h = parseInt(fi.style.height) || fi.offsetHeight || 336;
   });
   st["win-log"].h = parseInt($("#log-out").style.height) || $("#log-out").offsetHeight || 380;
   return st;
@@ -1005,6 +1037,13 @@ function applyWinState(st) {
         // app windows are created on demand, so this browser may not have
         // the element yet — openAppWin builds it before pass 2 places it
         if (v.open && !w) openAppWin(id.slice(8));
+        else if (w && v.open && w.hidden) openWin(w);
+        else if (w && !v.open && !w.hidden) closeWin(w);
+        continue;
+      }
+      if (id.startsWith("win-ws-")) {
+        // Finder folder windows: same on-demand pattern, path from the id
+        if (v.open && !w) openFinderWin(decodeURIComponent(id.slice(7)));
         else if (w && v.open && w.hidden) openWin(w);
         else if (w && !v.open && !w.hidden) closeWin(w);
         continue;
@@ -1025,6 +1064,10 @@ function applyWinState(st) {
       if (v.z) { w.style.zIndex = v.z; maxZ = Math.max(maxZ, v.z); }
       w.classList.toggle("shaded", !!v.shaded);
       if (id === "win-log" && v.h) $("#log-out").style.height = Math.max(96, Math.min(window.innerHeight - 170, v.h)) + "px";
+      if (id.startsWith("win-ws-") && v.h) {
+        const fi = w.querySelector(".finder-icons");
+        if (fi) fi.style.height = Math.max(96, Math.min(window.innerHeight - 170, v.h)) + "px";
+      }
       if (id.startsWith("win-app-") && v.h) {
         const fr = w.querySelector(".app-frame");
         if (fr) fr.style.height = Math.max(120, Math.min(window.innerHeight - 120, v.h)) + "px";
@@ -1157,9 +1200,22 @@ let selectedIcon = null;
 function renderIcons(vms) {
   const box = $("#icons");
   box.replaceChildren();
+  {
+    const ic = el("div", { class: "dicon" + (selectedIcon === "ws" ? " sel" : ""), title: "Workspace — files shared between you, apps and VMs" });
+    ic.innerHTML = FOLDER_ICON;
+    ic.append(el("span", { class: "lbl" }, "Workspace"));
+    ic.addEventListener("click", e => {
+      e.stopPropagation();
+      selectedIcon = "ws";
+      box.querySelectorAll(".dicon").forEach(d => d.classList.remove("sel"));
+      ic.classList.add("sel");
+    });
+    ic.addEventListener("dblclick", () => openFinderWin(""));
+    box.append(ic);
+  }
   for (const vm of vms) {
     const ic = el("div", { class: "dicon" + (selectedIcon === vm.name ? " sel" : ""), title: `${vm.name} — ${vm.state}` });
-    ic.innerHTML = macIcon(vm.state, 36);
+    ic.innerHTML = macIcon(vm.state, 32);
     ic.append(el("span", { class: "lbl" }, vm.name));
     ic.addEventListener("click", e => {
       e.stopPropagation();
@@ -1190,9 +1246,18 @@ function renderIcons(vms) {
 
 // ---- desktop apps (folders in ~/.exe/apps with app.json + index.html) ----
 let appsList = [];
-const APP_FALLBACK_ICON = `<svg width="34" height="34" viewBox="0 0 32 32" shape-rendering="crispEdges">
+const APP_FALLBACK_ICON = `<svg width="32" height="32" viewBox="0 0 32 32" shape-rendering="crispEdges">
   <path d="M16 2.5 L29.5 16 L16 29.5 L2.5 16 Z" fill="#DAD5CA" stroke="#000"/>
   <path d="M16 8.5 L23.5 16 L16 23.5 L8.5 16 Z" fill="#9C9AF2" stroke="#000"/>
+</svg>`;
+// OS 9 folder, downsampled pixel-for-pixel from a real Mac OS 9 Finder
+// capture (Macintosh HD window): lavender perspective folder, navy outline,
+// quantized to the sampled 9-color ramp and run-length encoded per color.
+const FOLDER_ICON = `<svg width="32" height="32" viewBox="0 0 32 32" shape-rendering="crispEdges"><g transform="translate(0 0)"><path fill="#6666be" d="M2 0h1v1h-1zM4 1h1v1h-1zM0 2h2v1h-2zM6 2h1v1h-1zM0 3h1v1h-1zM8 3h1v1h-1zM0 4h1v1h-1zM10 4h1v1h-1zM0 5h1v1h-1zM12 5h1v1h-1zM15 5h1v1h-1zM17 5h1v1h-1zM0 6h1v1h-1zM14 6h1v1h-1zM19 6h1v1h-1zM21 7h1v1h-1zM15 8h1v1h-1zM17 9h1v1h-1zM22 9h1v1h-1zM19 10h1v1h-1zM21 11h1v1h-1zM23 11h1v1h-1zM22 12h2v1h-2zM23 13h1v1h-1zM23 14h1v1h-1zM19 29h1v1h-1zM21 30h1v1h-1z"/><path fill="#4c4c96" d="M3 0h1v1h-1zM2 1h1v1h-1zM5 1h1v1h-1zM7 2h1v1h-1zM3 3h1v1h-1zM9 3h1v1h-1zM5 4h1v1h-1zM11 4h1v1h-1zM7 5h1v1h-1zM13 5h1v1h-1zM18 5h1v1h-1zM9 6h1v1h-1zM20 6h1v1h-1zM0 7h1v1h-1zM11 7h1v1h-1zM0 8h1v1h-1zM13 8h1v1h-1zM22 8h1v1h-1zM0 9h1v1h-1zM15 9h1v1h-1zM0 10h1v1h-1zM17 10h1v1h-1zM23 10h1v1h-1zM0 11h1v1h-1zM19 11h1v1h-1zM0 12h1v1h-1zM0 13h1v1h-1zM0 14h1v1h-1zM0 15h1v1h-1zM23 15h1v1h-1zM0 16h1v1h-1zM23 16h1v1h-1zM0 17h1v1h-1zM23 17h1v1h-1zM0 18h1v1h-1zM23 18h1v1h-1zM0 19h1v1h-1zM23 19h1v1h-1zM0 20h1v1h-1zM23 20h1v1h-1zM2 21h1v1h-1zM23 21h1v1h-1zM4 22h1v1h-1zM23 22h1v1h-1zM6 23h1v1h-1zM23 23h1v1h-1zM8 24h1v1h-1zM23 24h1v1h-1zM10 25h1v1h-1zM23 25h1v1h-1zM12 26h1v1h-1zM23 26h1v1h-1zM14 27h1v1h-1zM23 27h1v1h-1zM16 28h1v1h-1zM23 28h1v1h-1zM18 29h1v1h-1zM23 29h1v1h-1zM20 30h1v1h-1zM23 30h1v1h-1z"/><path fill="#30305e" d="M4 0h1v1h-1zM6 1h1v1h-1zM2 2h1v1h-1zM8 2h1v1h-1zM4 3h1v1h-1zM10 3h1v1h-1zM6 4h1v1h-1zM12 4h1v1h-1zM15 4h3v1h-3zM8 5h1v1h-1zM14 5h1v1h-1zM19 5h1v1h-1zM10 6h1v1h-1zM21 6h1v1h-1zM12 7h1v1h-1zM22 7h1v1h-1zM14 8h1v1h-1zM16 9h1v1h-1zM23 9h1v1h-1zM18 10h1v1h-1zM24 10h1v1h-1zM20 11h1v1h-1zM21 12h1v1h-1zM22 13h1v1h-1zM22 14h1v1h-1zM22 15h1v1h-1zM22 16h1v1h-1zM22 17h1v1h-1zM22 18h1v1h-1zM22 19h1v1h-1zM22 20h1v1h-1zM1 21h1v1h-1zM22 21h1v1h-1zM3 22h1v1h-1zM22 22h1v1h-1zM5 23h1v1h-1zM22 23h1v1h-1zM25 23h2v1h-2zM7 24h1v1h-1zM22 24h1v1h-1zM25 24h3v1h-3zM9 25h1v1h-1zM22 25h1v1h-1zM25 25h2v1h-2zM11 26h1v1h-1zM22 26h1v1h-1zM25 26h1v1h-1zM13 27h1v1h-1zM22 27h1v1h-1zM15 28h1v1h-1zM22 28h1v1h-1zM17 29h1v1h-1zM22 29h1v1h-1zM19 30h1v1h-1zM22 30h1v1h-1zM21 31h1v1h-1z"/><path fill="#9a9af4" d="M3 1h1v1h-1zM4 2h2v1h-2zM6 3h2v1h-2zM8 4h2v1h-2zM10 5h2v1h-2zM16 5h1v1h-1zM12 6h1v1h-1zM15 6h1v1h-1zM2 20h1v1h-1zM20 20h1v1h-1zM4 21h1v1h-1zM19 21h2v1h-2zM6 22h1v1h-1zM18 22h3v1h-3zM8 23h1v1h-1zM17 23h4v1h-4zM10 24h1v1h-1zM16 24h5v1h-5zM12 25h1v1h-1zM15 25h6v1h-6zM14 26h7v1h-7zM16 27h5v1h-5zM18 28h3v1h-3z"/><path fill="#8080dc" d="M3 2h1v1h-1zM2 3h1v1h-1zM5 3h1v1h-1zM4 4h1v1h-1zM7 4h1v1h-1zM6 5h1v1h-1zM9 5h1v1h-1zM8 6h1v1h-1zM11 6h1v1h-1zM13 6h1v1h-1zM16 6h3v1h-3zM10 7h1v1h-1zM13 7h8v1h-8zM12 8h1v1h-1zM16 8h6v1h-6zM14 9h1v1h-1zM18 9h4v1h-4zM16 10h1v1h-1zM20 10h3v1h-3zM18 11h1v1h-1zM22 11h1v1h-1zM20 12h1v1h-1zM21 14h1v1h-1zM21 15h1v1h-1zM21 16h1v1h-1zM21 17h1v1h-1zM21 18h1v1h-1zM21 19h1v1h-1zM1 20h1v1h-1zM21 20h1v1h-1zM3 21h1v1h-1zM21 21h1v1h-1zM5 22h1v1h-1zM21 22h1v1h-1zM7 23h1v1h-1zM21 23h1v1h-1zM9 24h1v1h-1zM21 24h1v1h-1zM11 25h1v1h-1zM21 25h1v1h-1zM13 26h1v1h-1zM21 26h1v1h-1zM15 27h1v1h-1zM21 27h1v1h-1zM17 28h1v1h-1zM21 28h1v1h-1zM20 29h2v1h-2z"/><path fill="#ececfd" d="M1 3h1v1h-1zM3 4h1v1h-1z"/><path fill="#d2d2fa" d="M1 4h2v1h-2zM1 5h5v1h-5zM1 6h7v1h-7zM1 7h9v1h-9zM1 8h7v1h-7zM11 8h1v1h-1zM1 9h5v1h-5zM13 9h1v1h-1zM1 10h5v1h-5zM15 10h1v1h-1zM1 11h4v1h-4zM17 11h1v1h-1zM1 12h3v1h-3zM19 12h1v1h-1zM1 13h2v1h-2zM21 13h1v1h-1zM1 14h1v1h-1z"/><path fill="#b6b6f4" d="M8 8h3v1h-3zM6 9h7v1h-7zM6 10h9v1h-9zM5 11h12v1h-12zM4 12h15v1h-15zM3 13h18v1h-18zM2 14h19v1h-19zM1 15h20v1h-20zM1 16h20v1h-20zM1 17h20v1h-20zM1 18h20v1h-20zM1 19h20v1h-20zM3 20h17v1h-17zM5 21h14v1h-14zM7 22h11v1h-11zM9 23h8v1h-8zM11 24h5v1h-5zM13 25h2v1h-2z"/><path fill="#222244" d="M24 11h1v1h-1zM24 12h1v1h-1zM24 13h1v1h-1zM24 14h1v1h-1zM24 15h1v1h-1zM24 16h1v1h-1zM24 17h1v1h-1zM24 18h1v1h-1zM24 19h1v1h-1zM24 20h1v1h-1zM24 21h1v1h-1zM24 22h1v1h-1zM24 23h1v1h-1zM24 24h1v1h-1zM24 25h1v1h-1zM24 26h1v1h-1zM24 27h1v1h-1zM24 28h1v1h-1zM24 29h1v1h-1zM24 30h1v1h-1zM22 31h2v1h-2z"/><path fill="#000" fill-opacity="0.25" d="M25 20h1v1h-1zM27 21h1v1h-1zM29 22h1v1h-1zM30 26h1v1h-1zM29 27h1v1h-1zM28 28h1v1h-1zM27 29h1v1h-1zM26 30h1v1h-1zM25 31h1v1h-1z"/><path fill="#000" fill-opacity="0.5" d="M25 21h1v1h-1zM25 22h3v1h-3zM27 23h2v1h-2zM28 24h2v1h-2zM27 25h3v1h-3zM26 26h3v1h-3zM25 27h3v1h-3zM25 28h2v1h-2zM25 29h1v1h-1zM24 31h1v1h-1z"/><path fill="#000" fill-opacity="0.4" d="M26 21h1v1h-1zM28 22h1v1h-1zM30 25h1v1h-1z"/><path fill="#000" fill-opacity="0.45" d="M29 23h1v1h-1zM30 24h1v1h-1zM29 26h1v1h-1zM28 27h1v1h-1zM27 28h1v1h-1zM26 29h1v1h-1zM25 30h1v1h-1z"/><path fill="#000" fill-opacity="0.35" d="M30 23h1v1h-1z"/><path fill="#000" fill-opacity="0.2" d="M31 24h1v1h-1z"/></g></svg>`;
+// OS 9 generic document: white page, black outline, folded top-right corner
+const DOC_ICON = `<svg width="32" height="32" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <path fill="#fff" stroke="#000" d="M7.5 3.5h11l6 6v19h-17z"/>
+  <path fill="#ccc" stroke="#000" d="M18.5 3.5v6h6z"/>
 </svg>`;
 async function loadApps() {
   appsList = await j("/v1/apps");
@@ -1258,6 +1323,111 @@ window.addEventListener("message", e => {
     winSave();
   }
 });
+
+// ---- Workspace Finder: spatial windows over ~/.exe/workspace ----
+// Like the real OS 9 Finder, every folder opens its OWN window (no "up"
+// navigation), created on demand with id win-ws-<encoded path> so the
+// layout snapshot restores each folder window's geometry — spatial Finder
+// remembered per-folder window positions, and the snapshot gives us that.
+const fmtBytes = n => n >= 2 ** 30 ? (n / 2 ** 30).toFixed(1) + " GB"
+  : n >= 2 ** 20 ? (n / 2 ** 20).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " K";
+const GROW_TILE = `<svg class="grow-box" width="15" height="15" viewBox="0 0 15 15" shape-rendering="crispEdges">
+  <rect width="15" height="15" fill="#ccc"/>
+  <path fill="#000" d="M0 0h15v1H0zM0 1h1v14H0z"/>
+  <path fill="#fff" d="M1 1h14v1H1zM1 2h1v13H1z"/>
+  <path fill="#fff" d="M9 4h2v1H9zM8 5h1v1H8zM7 6h1v1H7zM6 7h1v1H6zM5 8h1v1H5zM4 9h1v1H4zM11 6h2v1h-2zM10 7h1v1h-1zM9 8h1v1H9zM8 9h1v1H8zM7 10h1v1H7zM6 11h1v1H6zM13 8h2v1h-2zM12 9h1v1h-1zM11 10h1v1h-1zM10 11h1v1h-1zM9 12h1v1H9zM8 13h1v1H8z"/>
+  <path fill="#777" d="M10 5h1v1h-1zM9 6h1v1H9zM8 7h1v1H8zM7 8h1v1H7zM6 9h1v1H6zM5 10h1v1H5zM12 7h1v1h-1zM11 8h1v1h-1zM10 9h1v1h-1zM9 10h1v1H9zM8 11h1v1H8zM7 12h1v1H7zM14 9h1v1h-1zM13 10h1v1h-1zM12 11h1v1h-1zM11 12h1v1h-1zM10 13h1v1h-1zM9 14h1v1H9z"/>
+  <path fill="#aaa" d="M4 10h1v1H4zM6 12h1v1H6zM8 14h1v1H8z"/>
+</svg>`;
+function openFinderWin(path, fromWin) {
+  const id = "win-ws-" + encodeURIComponent(path);
+  let w = document.getElementById(id);
+  if (!w) {
+    w = el("div", { class: "window grow finder-window", id });
+    // a folder opened from a parent window appears offset from it, OS 9 style
+    if (fromWin) {
+      w.style.left = (parseInt(fromWin.style.left) || 130) + 24 + "px";
+      w.style.top = (parseInt(fromWin.style.top) || 60) + 24 + "px";
+    } else {
+      const n = document.querySelectorAll("#desktop .finder-window").length;
+      w.style.left = (130 + n * 26) + "px";
+      w.style.top = (60 + n * 22) + "px";
+    }
+    w.style.width = "560px";
+    w.innerHTML = `<div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
+      <div class="title"></div>
+      <div class="stripe"></div><button class="tbox zoom"></button><button class="tbox shade"></button></div>
+      <div class="win-frame">
+        <div class="finder-status"><span class="ws-items">…</span></div>
+        <div class="finder-icons doc-scroll"></div>
+        ${GROW_TILE}
+      </div>`;
+    w.querySelector(".title").textContent = path ? path.split("/").pop() : "Workspace";
+    w.dataset.path = path;
+    const box = w.querySelector(".finder-icons");
+    box.addEventListener("click", e => {
+      if (e.target === box) box.querySelectorAll(".fitem").forEach(d => d.classList.remove("sel"));
+    });
+    w.querySelector(".grow-box").addEventListener("pointerdown", e => {
+      e.preventDefault(); e.stopPropagation();
+      focusWin(w);
+      const sw = w.offsetWidth, sh = box.offsetHeight, sx = e.clientX, sy = e.clientY;
+      winDragging = w;
+      const move = ev => {
+        w.style.width = Math.max(320, Math.min(window.innerWidth - 40, sw + ev.clientX - sx)) + "px";
+        box.style.height = Math.max(96, Math.min(window.innerHeight - 170, sh + ev.clientY - sy)) + "px";
+        winSaveLive();
+      };
+      const up = () => {
+        winDragging = null;
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        winSave();
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+    });
+    $("#desktop").append(w);
+    initWindow(w);
+  }
+  openWin(w);
+  loadFinder(w);
+}
+async function loadFinder(w) {
+  const path = w.dataset.path, items = w.querySelector(".ws-items");
+  let data;
+  try { data = await j("/v1/workspace?dir=" + encodeURIComponent(path)); }
+  catch (e) { items.textContent = e.message; return; }
+  const n = data.entries.length;
+  items.textContent = `${n} item${n === 1 ? "" : "s"}, ${fmtBytes(data.free)} available`;
+  const box = w.querySelector(".finder-icons");
+  box.replaceChildren();
+  for (const en of data.entries) {
+    const it = el("div", { class: "fitem", title: en.name });
+    it.innerHTML = en.dir ? FOLDER_ICON : DOC_ICON;
+    it.append(el("span", { class: "lbl" }, en.name));
+    it.addEventListener("click", e => {
+      e.stopPropagation();
+      box.querySelectorAll(".fitem").forEach(d => d.classList.remove("sel"));
+      it.classList.add("sel");
+    });
+    it.addEventListener("dblclick", () => {
+      const rel = path ? path + "/" + en.name : en.name;
+      if (en.dir) openFinderWin(rel, w);
+      else openWorkspaceFile(rel);
+    });
+    box.append(it);
+  }
+}
+// open a file in a new tab via an authed fetch — the token never lands in a URL
+async function openWorkspaceFile(rel) {
+  try {
+    const r = await api("/v1/workspace/" + rel.split("/").map(encodeURIComponent).join("/"));
+    const u = URL.createObjectURL(await r.blob());
+    window.open(u);
+    setTimeout(() => URL.revokeObjectURL(u), 60000);
+  } catch (e) {}
+}
 $("#desktop").addEventListener("mousedown", e => {
   if (e.target === $("#desktop") || e.target === $("#icons")) {
     selectedIcon = null;
