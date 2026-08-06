@@ -32,11 +32,15 @@ button.btn, button.ghost { background: var(--g300); color: var(--black);
   padding: 2px 13px; font-size: 12px; line-height: 14px; font-weight: bold; height: 20px;
   box-shadow: inset 1px 1px 0 var(--g300), inset -1px -1px 0 #777,
     inset 2px 2px 0 #fff, inset -2px -2px 0 #aaa; }
+/* OS 9 rings only the default button — the one Return triggers. Enter in
+   the field adds, so Add wears the ring (same treatment as the desktop's
+   dialog defaults); all other content buttons stay plain. */
+button.btn { outline: 2px solid var(--black); outline-offset: 1px; border-radius: 4px; }
 button.btn:active, button.ghost:active { background: #666; color: #fff;
   box-shadow: inset 1px 1px 0 #444, inset -1px -1px 0 #888,
     inset 2px 2px 0 #555, inset -2px -2px 0 #777; }
 button.btn:disabled, button.ghost:disabled { color: #777; border-color: #888;
-  background: var(--g300); box-shadow: none; }
+  background: var(--g300); box-shadow: none; outline-color: #888; }
 button.ghost.sm { padding: 1px 8px; font-size: 10px; height: auto; }
 
 /* OS 9 document window, like Help Center: below the toolbar the content
