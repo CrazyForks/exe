@@ -253,6 +253,12 @@ function add() {
 $("#add").addEventListener("click", add);
 $("#new").addEventListener("keydown", e => { if (e.key === "Enter") add(); });
 
+// clicking anywhere in the app raises its desktop window, like any OS 9
+// window content would — the desktop can't see clicks inside the iframe
+window.addEventListener("pointerdown", () => {
+  if (window.parent !== window) parent.postMessage({ exe: "focus" }, location.origin);
+}, { capture: true, passive: true });
+
 // OS 9 grow box: the window belongs to the desktop, so the grip just streams
 // pointer deltas up to the parent, which resizes the Platinum window around
 // this iframe. Pointer capture keeps the drag alive while the frame resizes.

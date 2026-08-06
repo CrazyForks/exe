@@ -345,3 +345,36 @@ func (s *Server) handleWorkspacePut(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleWorkspaceDelete(w http.ResponseWriter, r *http.Request) {
 	handleFileDelete(w, s.workspaceDir(), r.PathValue("path"))
 }
+
+// handleWorkspaceMove renames/moves a file or folder inside the workspace
+// (body: {"to": "rel/path"}). The Finder's Move To Trash uses it to park
+// items under the dot-hidden .Trash folder instead of hard-deleting.
+func (s *Server) handleWorkspaceMove(w http.ResponseWriter, r *http.Request) {
+	root := s.workspaceDir()
+	src, err := scopedPath(root, r.PathValue("path"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	var body struct {
+		To string `json:"to"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, errors.New("bad request body"))
+		return
+	}
+	dst, err := scopedPath(root, body.To)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := os.Rename(src, dst); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"moved": filepath.ToSlash(body.To)})
+}

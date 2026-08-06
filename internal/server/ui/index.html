@@ -62,7 +62,12 @@ a { color: #202a87; text-decoration: underline; }
 }
 .dd-item { padding: 3px 22px 3px 18px; white-space: nowrap; }
 .dd-item:hover { background: var(--hl); color: #fff; }
+.dd-item.dis { color: #888; }
+.dd-item.dis:hover { background: none; color: #888; }
 .dd-sep { height: 1px; background: var(--g600); margin: 3px 2px; box-shadow: 0 1px 0 #fff; }
+/* Finder contextual menu, sampled from a real OS 9 capture: #ddd face
+   (menubar menus are lighter), same groove separators and hard shadow */
+#ctx-menu { top: auto; background: var(--g300); min-width: 170px; z-index: 5000; }
 
 /* ---------- desktop icons ---------- */
 #desktop { position: fixed; inset: 20px 0 0 0; }
@@ -167,6 +172,28 @@ a { color: #202a87; text-decoration: underline; }
   font-size: 12px; padding: 0 3px; }
 .fitem.sel svg { filter: brightness(.55) saturate(1.3); }
 .fitem.sel .lbl { background: var(--hl); color: #fff; }
+
+/* Get Info window, OS 9 style: icon + name header, groove rule, then
+   right-aligned bold labels over a two-column grid */
+#gi-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.gi-sep { height: 1px; background: var(--g600); box-shadow: 0 1px 0 #fff; margin: 6px 0 10px; }
+.gi-grid { display: grid; grid-template-columns: max-content 1fr; gap: 5px 8px; font-size: 12px; }
+.gi-grid b { text-align: right; }
+.gi-grid span { user-select: text; word-break: break-word; }
+
+/* text editor windows, modeled on BBEdit 2.1.3: a platinum info bar
+   (pencil, doc icon, colon-separated path, Last Saved line) over an
+   unwrapped Monaco text area with both scrollbars and the grow corner */
+.ed-info { background: var(--g300); border-bottom: 1px solid var(--black);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.6);
+  padding: 5px 8px 4px; font-size: 12px;
+  display: grid; grid-template-columns: 22px 1fr; row-gap: 3px; align-items: center; }
+.ed-info .ed-main { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ed-info .ed-path, .ed-info .ed-saved { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ed-text { display: block; width: 100%; height: 380px; margin: 0; padding: 4px 6px;
+  border: 0; border-radius: 0; box-shadow: none; background: #fff; color: #000;
+  font: 12px/1.4 var(--mono); min-height: 0; resize: none; }
+.ed-text:focus { outline: none; }
 
 /* sunken content frame, inset 4px into the platinum chrome */
 .win-frame { margin: 0 4px 4px; border: 1px solid var(--black); background: var(--g300);
@@ -547,6 +574,7 @@ td .mono, td.mono { user-select: text; }
   <div class="dd-sep"></div>
   <div class="dd-item" data-act="token">Set API Token…</div>
 </div>
+<div class="dropdown" id="ctx-menu" hidden></div>
 
 <div id="desktop">
   <div id="icons"></div>
@@ -677,6 +705,25 @@ td .mono, td.mono { user-select: text; }
         <div class="row" style="margin-top:12px">
           <span class="muted" id="cfg-status" style="flex:1"></span>
           <button class="btn" id="cfg-save">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Get Info, OS 9 style (opened from the Finder contextual menu) -->
+  <div class="window" id="win-getinfo" style="left:220px; top:110px; width:300px;" hidden>
+    <div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
+      <div class="title">Info</div>
+      <div class="stripe"></div></div>
+    <div class="win-frame">
+      <div class="win-body" style="padding:10px">
+        <div id="gi-head"><span id="gi-icon"></span><b id="gi-name"></b></div>
+        <div class="gi-sep"></div>
+        <div class="gi-grid">
+          <b>Kind:</b><span id="gi-kind"></span>
+          <b>Size:</b><span id="gi-size"></span>
+          <b>Where:</b><span id="gi-where"></span>
+          <b>Modified:</b><span id="gi-mod"></span>
         </div>
       </div>
     </div>
@@ -1017,11 +1064,9 @@ function winSnapshot() {
       z: +w.style.zIndex || 0,
       open: !w.hidden, shaded: w.classList.contains("shaded"),
     };
-    // app and Finder windows are also resizable vertically (grow box)
-    const fr = w.querySelector(".app-frame");
-    if (fr) st[w.id].h = parseInt(fr.style.height) || fr.offsetHeight || 0;
-    const fi = w.querySelector(".finder-icons");
-    if (fi) st[w.id].h = parseInt(fi.style.height) || fi.offsetHeight || 336;
+    // app, Finder and editor windows are also resizable vertically (grow box)
+    const g = w.querySelector(".app-frame, .finder-icons, .ed-text");
+    if (g) st[w.id].h = parseInt(g.style.height) || g.offsetHeight || 0;
   });
   st["win-log"].h = parseInt($("#log-out").style.height) || $("#log-out").offsetHeight || 380;
   return st;
@@ -1041,9 +1086,11 @@ function applyWinState(st) {
         else if (w && !v.open && !w.hidden) closeWin(w);
         continue;
       }
-      if (id.startsWith("win-ws-")) {
-        // Finder folder windows: same on-demand pattern, path from the id
-        if (v.open && !w) openFinderWin(decodeURIComponent(id.slice(7)));
+      if (id.startsWith("win-ws-") || id.startsWith("win-ed-")) {
+        // Finder folder / editor windows: same on-demand pattern as app
+        // windows, with the path recovered from the id
+        const open = id.startsWith("win-ws-") ? openFinderWin : openEditorWin;
+        if (v.open && !w) open(decodeURIComponent(id.slice(7)));
         else if (w && v.open && w.hidden) openWin(w);
         else if (w && !v.open && !w.hidden) closeWin(w);
         continue;
@@ -1064,9 +1111,9 @@ function applyWinState(st) {
       if (v.z) { w.style.zIndex = v.z; maxZ = Math.max(maxZ, v.z); }
       w.classList.toggle("shaded", !!v.shaded);
       if (id === "win-log" && v.h) $("#log-out").style.height = Math.max(96, Math.min(window.innerHeight - 170, v.h)) + "px";
-      if (id.startsWith("win-ws-") && v.h) {
-        const fi = w.querySelector(".finder-icons");
-        if (fi) fi.style.height = Math.max(96, Math.min(window.innerHeight - 170, v.h)) + "px";
+      if ((id.startsWith("win-ws-") || id.startsWith("win-ed-")) && v.h) {
+        const g = w.querySelector(".finder-icons, .ed-text");
+        if (g) g.style.height = Math.max(96, Math.min(window.innerHeight - 170, v.h)) + "px";
       }
       if (id.startsWith("win-app-") && v.h) {
         const fr = w.querySelector(".app-frame");
@@ -1309,7 +1356,11 @@ window.addEventListener("message", e => {
   const fr = [...document.querySelectorAll(".app-frame")].find(f => f.contentWindow === e.source);
   if (!fr) return;
   const w = fr.closest(".window");
-  if (e.data.exe === "grow-start") {
+  if (e.data.exe === "focus") {
+    // clicks inside the iframe never reach the window's own mousedown
+    // handler, so apps raise their window through the bridge
+    focusWin(w);
+  } else if (e.data.exe === "grow-start") {
     appGrow = { win: w, frame: fr, w: w.offsetWidth, h: fr.offsetHeight };
     winDragging = w;
     focusWin(w);
@@ -1400,32 +1451,205 @@ async function loadFinder(w) {
   catch (e) { items.textContent = e.message; return; }
   const n = data.entries.length;
   items.textContent = `${n} item${n === 1 ? "" : "s"}, ${fmtBytes(data.free)} available`;
+  w._entries = data.entries; // Duplicate consults this for copy-name collisions
   const box = w.querySelector(".finder-icons");
   box.replaceChildren();
   for (const en of data.entries) {
     const it = el("div", { class: "fitem", title: en.name });
     it.innerHTML = en.dir ? FOLDER_ICON : DOC_ICON;
     it.append(el("span", { class: "lbl" }, en.name));
-    it.addEventListener("click", e => {
-      e.stopPropagation();
+    const select = () => {
       box.querySelectorAll(".fitem").forEach(d => d.classList.remove("sel"));
       it.classList.add("sel");
-    });
-    it.addEventListener("dblclick", () => {
+    };
+    it.addEventListener("click", e => { e.stopPropagation(); select(); });
+    it.addEventListener("dblclick", () => openEntry(en, path ? path + "/" + en.name : en.name, w));
+    it.addEventListener("contextmenu", e => {
+      e.preventDefault(); e.stopPropagation();
+      select();
       const rel = path ? path + "/" + en.name : en.name;
-      if (en.dir) openFinderWin(rel, w);
-      else openWorkspaceFile(rel);
+      showCtxMenu(e.clientX, e.clientY, [
+        { label: "Open", act: () => openEntry(en, rel, w) },
+        { label: "Move To Trash", act: () => wsTrash(rel, w) },
+        "-",
+        { label: "Get Info", act: () => showGetInfo(en, rel) },
+        { label: "Duplicate", act: () => wsDuplicate(en, rel, w), dis: !!en.dir },
+      ]);
     });
     box.append(it);
   }
 }
+function openEntry(en, rel, w) {
+  if (en.dir) openFinderWin(rel, w);
+  else if (isTextFile(en.name) && en.size < 1 << 20) openEditorWin(rel, w);
+  else openWorkspaceFile(rel);
+}
+const wsUrl = rel => "/v1/workspace/" + rel.split("/").map(encodeURIComponent).join("/");
 // open a file in a new tab via an authed fetch — the token never lands in a URL
 async function openWorkspaceFile(rel) {
   try {
-    const r = await api("/v1/workspace/" + rel.split("/").map(encodeURIComponent).join("/"));
+    const r = await api(wsUrl(rel));
     const u = URL.createObjectURL(await r.blob());
     window.open(u);
     setTimeout(() => URL.revokeObjectURL(u), 60000);
+  } catch (e) {}
+}
+
+// ---- Finder contextual menu, styled from a real OS 9 capture ----
+const ctxMenu = $("#ctx-menu");
+function showCtxMenu(x, y, items) {
+  ctxMenu.replaceChildren();
+  for (const it of items) {
+    if (it === "-") { ctxMenu.append(el("div", { class: "dd-sep" })); continue; }
+    const d = el("div", { class: "dd-item" + (it.dis ? " dis" : "") }, it.label);
+    if (!it.dis) d.addEventListener("click", () => { ctxMenu.hidden = true; it.act(); });
+    ctxMenu.append(d);
+  }
+  ctxMenu.hidden = false;
+  const r = ctxMenu.getBoundingClientRect();
+  ctxMenu.style.left = Math.min(x, window.innerWidth - r.width - 4) + "px";
+  ctxMenu.style.top = Math.min(y, window.innerHeight - r.height - 4) + "px";
+}
+document.addEventListener("mousedown", e => { if (!e.target.closest("#ctx-menu")) ctxMenu.hidden = true; });
+document.addEventListener("keydown", e => { if (e.key === "Escape") ctxMenu.hidden = true; });
+
+// Move To Trash parks the item in the dot-hidden .Trash folder (the move
+// endpoint creates it); a timestamp prefix keeps trashed names unique
+async function wsTrash(rel, w) {
+  try {
+    await api(wsUrl(rel), { method: "POST", body: JSON.stringify({ to: ".Trash/" + Date.now() + "-" + rel.split("/").pop() }) });
+  } catch (e) {}
+  loadFinder(w);
+}
+async function wsDuplicate(en, rel, w) {
+  try {
+    const blob = await (await api(wsUrl(rel))).blob();
+    const dot = en.name.lastIndexOf(".");
+    const base = dot > 0 ? en.name.slice(0, dot) : en.name;
+    const ext = dot > 0 ? en.name.slice(dot) : "";
+    let cp = base + " copy" + ext, n = 1;
+    while ((w._entries || []).some(x => x.name === cp)) cp = base + " copy " + ++n + ext;
+    const dir = rel.split("/").slice(0, -1).join("/");
+    await api(wsUrl(dir ? dir + "/" + cp : cp), { method: "PUT", body: blob });
+  } catch (e) {}
+  loadFinder(w);
+}
+function showGetInfo(en, rel) {
+  $("#win-getinfo .title").textContent = en.name + " Info";
+  $("#gi-icon").innerHTML = en.dir ? FOLDER_ICON : DOC_ICON;
+  $("#gi-name").textContent = en.name;
+  $("#gi-kind").textContent = en.dir ? "folder" : "document";
+  $("#gi-size").textContent = en.dir ? "—" : `${fmtBytes(en.size || 0)} (${(en.size || 0).toLocaleString()} bytes)`;
+  const dir = rel.split("/").slice(0, -1).join("/");
+  $("#gi-where").textContent = "Workspace" + (dir ? " :" + dir.split("/").join(" :") : "");
+  $("#gi-mod").textContent = edFmtDate(en.modified);
+  openWin("#win-getinfo");
+}
+
+// ---- text editor windows, modeled on BBEdit 2.1.3 ----
+// Text files double-clicked in a Finder window open here, one spatial
+// window per file (id win-ed-<encoded path>, geometry in the snapshot).
+// Edits autosave (debounced PUT) and refresh the Last Saved line.
+const ED_EXT = new Set(("txt md markdown json js mjs ts tsx css html htm xml svg sh bash zsh py rb go rs c h " +
+  "cpp hpp java kt swift yaml yml toml ini cfg conf log csv tsv sql env gitignore service").split(" "));
+const ED_NAMES = new Set(["README", "LICENSE", "Makefile", "Dockerfile", "CHANGELOG", "TODO"]);
+function isTextFile(name) {
+  if (ED_NAMES.has(name)) return true;
+  const dot = name.lastIndexOf(".");
+  return dot > 0 && ED_EXT.has(name.slice(dot + 1).toLowerCase());
+}
+// small b/w pixel icons for the info bar: pencil, mini document, marker
+const ED_PENCIL = `<svg width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges"><path fill="#000" d="M10 1h2v1h-2zM9 2h1v1H9zM12 2h1v1h-1zM8 3h1v1H8zM10 3h1v1h-1zM13 3h1v1h-1zM7 4h1v1H7zM11 4h1v1h-1zM13 4h1v1h-1zM6 5h1v1H6zM12 5h1v1h-1zM5 6h1v1H5zM11 6h1v1h-1zM4 7h1v1H4zM10 7h1v1h-1zM3 8h1v1H3zM9 8h1v1H9zM3 9h1v1H3zM8 9h1v1H8zM2 10h1v1H2zM7 10h1v1H7zM2 11h2v1H2zM5 11h2v1H5zM2 12h1v1H2z"/></svg>`;
+const ED_DOC = `<svg width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges"><path fill="#fff" stroke="#000" d="M3.5 1.5h6l3 3v10h-9z"/><path fill="#ccc" stroke="#000" d="M9.5 1.5v3h3z"/></svg>`;
+const ED_MARK = `<svg width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges"><path d="M8 4.5 L11.5 8 L8 11.5 L4.5 8 Z" fill="#eee" stroke="#000"/></svg>`;
+const edFmtDate = d => new Date(d).toLocaleString("en-US",
+  { month: "numeric", day: "numeric", year: "2-digit", hour: "numeric", minute: "2-digit", second: "2-digit" }).replace(",", "");
+function openEditorWin(path, fromWin) {
+  const id = "win-ed-" + encodeURIComponent(path);
+  let w = document.getElementById(id);
+  if (!w) {
+    w = el("div", { class: "window grow editor-window", id });
+    if (fromWin) {
+      w.style.left = (parseInt(fromWin.style.left) || 130) + 24 + "px";
+      w.style.top = (parseInt(fromWin.style.top) || 60) + 24 + "px";
+    } else {
+      const n = document.querySelectorAll("#desktop .editor-window").length;
+      w.style.left = (150 + n * 26) + "px";
+      w.style.top = (80 + n * 22) + "px";
+    }
+    w.style.width = "620px";
+    w.innerHTML = `<div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
+      <div class="title"></div>
+      <div class="stripe"></div><button class="tbox zoom"></button><button class="tbox shade"></button></div>
+      <div class="win-frame">
+        <div class="ed-info">
+          ${ED_PENCIL}<div class="ed-main">${ED_DOC}<span class="ed-path"></span></div>
+          ${ED_MARK}<span class="ed-saved">…</span>
+        </div>
+        <textarea class="ed-text doc-scroll" wrap="off" spellcheck="false" autocomplete="off"></textarea>
+        ${GROW_TILE}
+      </div>`;
+    w.querySelector(".title").textContent = path.split("/").pop();
+    // classic Mac colon path, with the workspace as the volume
+    w.querySelector(".ed-path").textContent = "Workspace :" + path.split("/").join(" :");
+    w.dataset.path = path;
+    const ta = w.querySelector(".ed-text");
+    let saveT = null;
+    ta.addEventListener("input", () => {
+      w.dataset.dirty = "1";
+      clearTimeout(saveT);
+      saveT = setTimeout(async () => {
+        try {
+          await api("/v1/workspace/" + path.split("/").map(encodeURIComponent).join("/"),
+            { method: "PUT", body: ta.value });
+          delete w.dataset.dirty;
+          w.querySelector(".ed-saved").textContent = "Last Saved: " + edFmtDate(Date.now());
+        } catch (e) {
+          w.querySelector(".ed-saved").textContent = "Save failed: " + e.message;
+        }
+      }, 400);
+    });
+    w.querySelector(".grow-box").addEventListener("pointerdown", e => {
+      e.preventDefault(); e.stopPropagation();
+      focusWin(w);
+      const sw = w.offsetWidth, sh = ta.offsetHeight, sx = e.clientX, sy = e.clientY;
+      winDragging = w;
+      const move = ev => {
+        w.style.width = Math.max(360, Math.min(window.innerWidth - 40, sw + ev.clientX - sx)) + "px";
+        ta.style.height = Math.max(96, Math.min(window.innerHeight - 170, sh + ev.clientY - sy)) + "px";
+        winSaveLive();
+      };
+      const up = () => {
+        winDragging = null;
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        winSave();
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+    });
+    $("#desktop").append(w);
+    initWindow(w);
+  }
+  openWin(w);
+  loadEditor(w);
+}
+async function loadEditor(w) {
+  if (w.dataset.dirty) return; // unsaved edits in flight — don't clobber
+  const path = w.dataset.path, ta = w.querySelector(".ed-text");
+  try {
+    const r = await api("/v1/workspace/" + path.split("/").map(encodeURIComponent).join("/"));
+    ta.value = await r.text();
+  } catch (e) {
+    w.querySelector(".ed-saved").textContent = e.message;
+    return;
+  }
+  // Last Saved comes from the parent folder's listing, so restores work too
+  try {
+    const dir = path.split("/").slice(0, -1).join("/");
+    const data = await j("/v1/workspace?dir=" + encodeURIComponent(dir));
+    const en = data.entries.find(x => x.name === path.split("/").pop());
+    if (en) w.querySelector(".ed-saved").textContent = "Last Saved: " + edFmtDate(en.modified);
   } catch (e) {}
 }
 $("#desktop").addEventListener("mousedown", e => {

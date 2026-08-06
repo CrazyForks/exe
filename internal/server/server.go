@@ -97,6 +97,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/workspace", s.handleWorkspaceList)
 	mux.HandleFunc("GET /v1/workspace/{path...}", s.handleWorkspaceGet)
 	mux.HandleFunc("PUT /v1/workspace/{path...}", s.handleWorkspacePut)
+	mux.HandleFunc("POST /v1/workspace/{path...}", s.handleWorkspaceMove)
 	mux.HandleFunc("DELETE /v1/workspace/{path...}", s.handleWorkspaceDelete)
 	mux.HandleFunc("GET /v1/chat/status", s.handleChatStatus)
 	mux.HandleFunc("GET /v1/chat/sessions", s.handleChatSessions)
