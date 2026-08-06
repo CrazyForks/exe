@@ -122,6 +122,21 @@ a { color: #202a87; text-decoration: underline; }
 /* desktop app windows (~/.exe/apps) host their UI in an iframe set into the
    sunken frame; the app page brings its own Platinum styling */
 .app-frame { display: block; border: 0; width: 100%; height: 400px; background: var(--g200); }
+/* ---- OS 9 grow box corner, a small framework any window can reuse ----
+   Add class "grow" to a .window and put a 15×15 grow tile at the frame's
+   bottom-right: desktop windows drop in a class="grow-box" SVG (see the
+   Daemon Log window); app windows declare window.grow in app.json and draw
+   the tile inside their iframe. The tile carries its own black top/left
+   separator lines (they continue the scrollbar/statusbar frame lines), and
+   the rules below stop the frame's black border and white bevel along the
+   corner, so the tile face runs straight into the platinum chrome — on a
+   real OS 9 window (CodeWarrior capture) the corner has no trailing lines
+   of its own, just face → #999 → black. */
+.window.grow .win-frame::before { content: ""; position: absolute; right: -2px; bottom: -2px;
+  width: 2px; height: 17px; background: var(--g400); }
+.window.grow .win-frame::after { content: ""; position: absolute; right: -2px; bottom: -2px;
+  width: 17px; height: 2px; background: var(--g400); }
+.grow-box { position: absolute; right: 0; bottom: 0; width: 15px; height: 15px; }
 
 /* sunken content frame, inset 4px into the platinum chrome */
 .win-frame { margin: 0 4px 4px; border: 1px solid var(--black); background: var(--g300);
@@ -262,12 +277,11 @@ pre.out { background: #10120f; color: #cfe3cf; border: 1px solid var(--black); p
   margin: 10px 0 0; font-family: var(--mono); font-size: 11px; max-height: 380px; overflow: auto;
   white-space: pre-wrap; word-break: break-word; user-select: text;
   box-shadow: -1px -1px 0 var(--g600), 1px 1px 0 #fff; }
-/* Daemon Log window: resizable via an OS 9 grow box in the frame corner;
-   the bottom strip is a plain status area like classic IE/Netscape.
-   16px total (border-box) so the strip's border-top is the same line as
-   the grow box tile's top separator row. */
-#win-log .statusbar { height: 16px; padding: 0 26px 0 8px; }
-#log-grow { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; }
+/* Daemon Log window: resizable via the shared grow box corner (.grow +
+   .grow-box); the bottom strip is a plain status area like classic
+   IE/Netscape. 15px total (border-box) so the strip's border-top is the
+   same line as the grow box tile's top separator row. */
+#win-log .statusbar { height: 15px; padding: 0 25px 0 8px; }
 #log-out { margin: 0; height: 380px; max-height: none; }
 /* sunken white list, like a Finder list view */
 .listbox { background: #fff; border: 1px solid var(--black); max-height: 240px; overflow: auto;
@@ -639,7 +653,7 @@ td .mono, td.mono { user-select: text; }
   </div>
 
   <!-- Daemon log -->
-  <div class="window" id="win-log" style="left:110px; top:90px; width:640px;" hidden>
+  <div class="window grow" id="win-log" style="left:110px; top:90px; width:640px;" hidden>
     <div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
       <div class="title">Daemon Log</div>
       <div class="stripe"></div><button class="tbox zoom"></button><button class="tbox shade"></button></div>
@@ -652,11 +666,14 @@ td .mono, td.mono { user-select: text; }
       </div>
       <!-- grow box sampled pixel-for-pixel from Mac OS 9 (Infinite Mac):
            black separators, white highlight, #ccc face, three diagonal
-           ridges of white over #777 with #aaa anti-aliased tail ends -->
-      <svg id="log-grow" width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges">
-        <rect width="16" height="16" fill="#ccc"/>
-        <path fill="#000" d="M0 0h16v1H0zM0 1h1v15H0z"/>
-        <path fill="#fff" d="M1 1h15v1H1zM1 2h1v14H1z"/>
+           ridges of white over #777 with #aaa anti-aliased tail ends.
+           15px: the sampled 16px tile minus its last face row/column,
+           which in a real window belongs to the frame bevel (the .grow
+           corner rules merge the face into the chrome there). -->
+      <svg id="log-grow" class="grow-box" width="15" height="15" viewBox="0 0 15 15" shape-rendering="crispEdges">
+        <rect width="15" height="15" fill="#ccc"/>
+        <path fill="#000" d="M0 0h15v1H0zM0 1h1v14H0z"/>
+        <path fill="#fff" d="M1 1h14v1H1zM1 2h1v13H1z"/>
         <path fill="#fff" d="M9 4h2v1H9zM8 5h1v1H8zM7 6h1v1H7zM6 7h1v1H6zM5 8h1v1H5zM4 9h1v1H4zM11 6h2v1h-2zM10 7h1v1h-1zM9 8h1v1H9zM8 9h1v1H8zM7 10h1v1H7zM6 11h1v1H6zM13 8h2v1h-2zM12 9h1v1h-1zM11 10h1v1h-1zM10 11h1v1h-1zM9 12h1v1H9zM8 13h1v1H8z"/>
         <path fill="#777" d="M10 5h1v1h-1zM9 6h1v1H9zM8 7h1v1H8zM7 8h1v1H7zM6 9h1v1H6zM5 10h1v1H5zM12 7h1v1h-1zM11 8h1v1h-1zM10 9h1v1h-1zM9 10h1v1H9zM8 11h1v1H8zM7 12h1v1H7zM14 9h1v1h-1zM13 10h1v1h-1zM12 11h1v1h-1zM11 12h1v1h-1zM10 13h1v1h-1zM9 14h1v1H9z"/>
         <path fill="#aaa" d="M4 10h1v1H4zM6 12h1v1H6zM8 14h1v1H8z"/>
@@ -970,6 +987,9 @@ function winSnapshot() {
       z: +w.style.zIndex || 0,
       open: !w.hidden, shaded: w.classList.contains("shaded"),
     };
+    // app windows are also resizable vertically (grow box → iframe height)
+    const fr = w.querySelector(".app-frame");
+    if (fr) st[w.id].h = parseInt(fr.style.height) || fr.offsetHeight || 0;
   });
   st["win-log"].h = parseInt($("#log-out").style.height) || $("#log-out").offsetHeight || 380;
   return st;
@@ -1005,6 +1025,10 @@ function applyWinState(st) {
       if (v.z) { w.style.zIndex = v.z; maxZ = Math.max(maxZ, v.z); }
       w.classList.toggle("shaded", !!v.shaded);
       if (id === "win-log" && v.h) $("#log-out").style.height = Math.max(96, Math.min(window.innerHeight - 170, v.h)) + "px";
+      if (id.startsWith("win-app-") && v.h) {
+        const fr = w.querySelector(".app-frame");
+        if (fr) fr.style.height = Math.max(120, Math.min(window.innerHeight - 120, v.h)) + "px";
+      }
     }
     zTop = Math.max(zTop, maxZ);
     const wins = [...document.querySelectorAll("#desktop .window")].filter(x => !x.hidden);
@@ -1179,7 +1203,11 @@ async function loadApps() {
     const w = document.getElementById("win-app-" + a.name);
     if (!w) continue;
     w.querySelector(".title").textContent = a.title || a.name;
-    if (a.window && a.window.height) w.querySelector(".app-frame").style.height = a.window.height + "px";
+    w.classList.toggle("grow", !!(a.window && a.window.grow));
+    // app.json height is only a default — never clobber a height the user
+    // resized (restored from the layout snapshot as an inline style)
+    const fr = w.querySelector(".app-frame");
+    if (a.window && a.window.height && !fr.style.height) fr.style.height = a.window.height + "px";
   }
 }
 function openAppWin(name) {
@@ -1197,6 +1225,7 @@ function openAppWin(name) {
       <div class="stripe"></div><button class="tbox zoom"></button><button class="tbox shade"></button></div>
       <div class="win-frame"><iframe class="app-frame"></iframe></div>`;
     w.querySelector(".title").textContent = app.title || name;
+    if (app.window && app.window.grow) w.classList.add("grow");
     const fr = w.querySelector(".app-frame");
     if (app.window && app.window.height) fr.style.height = app.window.height + "px";
     const tok = tokenInput.value ? "?token=" + encodeURIComponent(tokenInput.value) : "";
@@ -1206,6 +1235,29 @@ function openAppWin(name) {
   }
   openWin(w);
 }
+// app windows: an OS 9 grow box inside the app's iframe streams pointer
+// deltas up via postMessage (the app can't reach its own window chrome);
+// the desktop resizes the Platinum window and iframe around it
+let appGrow = null; // { win, frame, w, h } captured at grow-start
+window.addEventListener("message", e => {
+  if (e.origin !== location.origin || !e.data || typeof e.data.exe !== "string") return;
+  const fr = [...document.querySelectorAll(".app-frame")].find(f => f.contentWindow === e.source);
+  if (!fr) return;
+  const w = fr.closest(".window");
+  if (e.data.exe === "grow-start") {
+    appGrow = { win: w, frame: fr, w: w.offsetWidth, h: fr.offsetHeight };
+    winDragging = w;
+    focusWin(w);
+  } else if (e.data.exe === "grow" && appGrow && appGrow.win === w) {
+    w.style.width = Math.max(240, Math.min(window.innerWidth - 40, appGrow.w + (+e.data.dx || 0))) + "px";
+    fr.style.height = Math.max(120, Math.min(window.innerHeight - 120, appGrow.h + (+e.data.dy || 0))) + "px";
+    winSaveLive();
+  } else if (e.data.exe === "grow-end" && appGrow && appGrow.win === w) {
+    appGrow = null;
+    winDragging = null;
+    winSave();
+  }
+});
 $("#desktop").addEventListener("mousedown", e => {
   if (e.target === $("#desktop") || e.target === $("#icons")) {
     selectedIcon = null;

@@ -49,8 +49,9 @@ func validAppName(name string) bool {
 }
 
 type appWindow struct {
-	Width  int `json:"width,omitempty"`
-	Height int `json:"height,omitempty"`
+	Width  int  `json:"width,omitempty"`
+	Height int  `json:"height,omitempty"`
+	Grow   bool `json:"grow,omitempty"` // app draws an OS 9 grow box in its corner
 }
 
 type appMeta struct {
