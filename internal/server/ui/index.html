@@ -334,11 +334,11 @@ pre.out { background: #10120f; color: #cfe3cf; border: 1px solid var(--black); p
   margin: 10px 0 0; font-family: var(--mono); font-size: 11px; max-height: 380px; overflow: auto;
   white-space: pre-wrap; word-break: break-word; user-select: text;
   box-shadow: -1px -1px 0 var(--g600), 1px 1px 0 #fff; }
-/* Daemon Log window: resizable via the shared grow box corner (.grow +
-   .grow-box); the bottom strip is a plain status area like classic
-   IE/Netscape. 15px total (border-box) so the strip's border-top is the
-   same line as the grow box tile's top separator row. */
-#win-log .statusbar { height: 15px; padding: 0 25px 0 8px; }
+/* Daemon Log and Chat windows: resizable via the shared grow box corner
+   (.grow + .grow-box); the bottom strip is a plain status area like
+   classic IE/Netscape. 15px total (border-box) so the strip's border-top
+   is the same line as the grow box tile's top separator row. */
+#win-log .statusbar, #win-chat .statusbar { height: 15px; padding: 0 25px 0 8px; }
 #log-out { margin: 0; height: 380px; max-height: none; }
 /* sunken white list, like a Finder list view */
 .listbox { background: #fff; border: 1px solid var(--black); max-height: 240px; overflow: auto;
@@ -381,8 +381,11 @@ td .mono, td.mono { user-select: text; }
 .cs-item.sel { background: var(--hl); }
 .cs-item.sel .cs-title, .cs-item.sel .cs-time { color: #fff; }
 .chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+/* No border-right: the always-on scrollbar draws its own black outer edge
+   (track, buttons and thumb alike), so a frame border there would double
+   it to 2px — same fix as the Todo app's list. */
 .chat-msgs { flex: 1; overflow-y: scroll; background: #fff; border: 1px solid var(--black);
-  padding: 10px; user-select: text;
+  border-right: 0; padding: 10px; user-select: text;
   box-shadow: -1px -1px 0 var(--g600), -1px 0 0 var(--g600), 0 -1px 0 var(--g600),
     1px 1px 0 #fff, 1px 0 0 #fff, 0 1px 0 #fff; }
 .msg { margin: 0 0 10px; }
@@ -759,7 +762,7 @@ td .mono, td.mono { user-select: text; }
   </div>
 
   <!-- Chat -->
-  <div class="window" id="win-chat" style="left:90px; top:44px; width:820px;" hidden>
+  <div class="window grow" id="win-chat" style="left:90px; top:44px; width:820px;" hidden>
     <div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
       <div class="title">Chat</div>
       <div class="stripe"></div><button class="tbox zoom"></button><button class="tbox shade"></button></div>
@@ -780,6 +783,14 @@ td .mono, td.mono { user-select: text; }
         </div>
       </div>
       <div class="statusbar"><span id="chat-status">…</span></div>
+      <svg id="chat-grow" class="grow-box" width="15" height="15" viewBox="0 0 15 15" shape-rendering="crispEdges">
+        <rect width="15" height="15" fill="#ccc"/>
+        <path fill="#000" d="M0 0h15v1H0zM0 1h1v14H0z"/>
+        <path fill="#fff" d="M1 1h14v1H1zM1 2h1v13H1z"/>
+        <path fill="#fff" d="M9 4h2v1H9zM8 5h1v1H8zM7 6h1v1H7zM6 7h1v1H6zM5 8h1v1H5zM4 9h1v1H4zM11 6h2v1h-2zM10 7h1v1h-1zM9 8h1v1H9zM8 9h1v1H8zM7 10h1v1H7zM6 11h1v1H6zM13 8h2v1h-2zM12 9h1v1h-1zM11 10h1v1h-1zM10 11h1v1h-1zM9 12h1v1H9zM8 13h1v1H8z"/>
+        <path fill="#777" d="M10 5h1v1h-1zM9 6h1v1H9zM8 7h1v1H8zM7 8h1v1H7zM6 9h1v1H6zM5 10h1v1H5zM12 7h1v1h-1zM11 8h1v1h-1zM10 9h1v1h-1zM9 10h1v1H9zM8 11h1v1H8zM7 12h1v1H7zM14 9h1v1h-1zM13 10h1v1h-1zM12 11h1v1h-1zM11 12h1v1h-1zM10 13h1v1h-1zM9 14h1v1H9z"/>
+        <path fill="#aaa" d="M4 10h1v1H4zM6 12h1v1H6zM8 14h1v1H8z"/>
+      </svg>
     </div>
   </div>
 
@@ -1038,6 +1049,35 @@ function initWindow(w) {
 }
 document.querySelectorAll(".window").forEach(initWindow);
 
+// shared grow-box drag: resizes the window's width and one body element's
+// height, live-syncing the layout snapshot. stickEl keeps a scroller pinned
+// to its end during the resize (log tail, chat transcript).
+function wireGrow(grip, w, body, minW, opts = {}) {
+  grip.addEventListener("pointerdown", e => {
+    e.preventDefault(); e.stopPropagation();
+    focusWin(w);
+    const sw = w.offsetWidth, sh = body.offsetHeight, sx = e.clientX, sy = e.clientY;
+    const st = opts.stickEl;
+    const stick = st && st.scrollHeight - st.scrollTop - st.clientHeight < 4;
+    winDragging = w;
+    const move = ev => {
+      w.style.width = Math.max(minW, Math.min(window.innerWidth - 40, sw + ev.clientX - sx)) + "px";
+      body.style.height = Math.max(opts.minH || 96, Math.min(window.innerHeight - 170, sh + ev.clientY - sy)) + "px";
+      if (stick) st.scrollTop = st.scrollHeight;
+      winSaveLive();
+    };
+    const up = () => {
+      winDragging = null;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      winSave();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  });
+}
+wireGrow($("#chat-grow"), $("#win-chat"), $(".chat-wrap"), 560, { minH: 240, stickEl: $("#chat-msgs") });
+
 // ---- window layout: persist + cross-browser sync ----
 // The whole desktop layout (per-window geometry, stacking, shade, and which
 // document windows are open) is one JSON snapshot of the DOM. It is cached
@@ -1064,8 +1104,8 @@ function winSnapshot() {
       z: +w.style.zIndex || 0,
       open: !w.hidden, shaded: w.classList.contains("shaded"),
     };
-    // app, Finder and editor windows are also resizable vertically (grow box)
-    const g = w.querySelector(".app-frame, .finder-icons, .ed-text");
+    // app, Finder, editor and chat windows are also resizable vertically
+    const g = w.querySelector(".app-frame, .finder-icons, .ed-text, .chat-wrap");
     if (g) st[w.id].h = parseInt(g.style.height) || g.offsetHeight || 0;
   });
   st["win-log"].h = parseInt($("#log-out").style.height) || $("#log-out").offsetHeight || 380;
@@ -1111,6 +1151,7 @@ function applyWinState(st) {
       if (v.z) { w.style.zIndex = v.z; maxZ = Math.max(maxZ, v.z); }
       w.classList.toggle("shaded", !!v.shaded);
       if (id === "win-log" && v.h) $("#log-out").style.height = Math.max(96, Math.min(window.innerHeight - 170, v.h)) + "px";
+      if (id === "win-chat" && v.h) $(".chat-wrap").style.height = Math.max(240, Math.min(window.innerHeight - 190, v.h)) + "px";
       if ((id.startsWith("win-ws-") || id.startsWith("win-ed-")) && v.h) {
         const g = w.querySelector(".finder-icons, .ed-text");
         if (g) g.style.height = Math.max(96, Math.min(window.innerHeight - 170, v.h)) + "px";
@@ -1419,25 +1460,7 @@ function openFinderWin(path, fromWin) {
     box.addEventListener("click", e => {
       if (e.target === box) box.querySelectorAll(".fitem").forEach(d => d.classList.remove("sel"));
     });
-    w.querySelector(".grow-box").addEventListener("pointerdown", e => {
-      e.preventDefault(); e.stopPropagation();
-      focusWin(w);
-      const sw = w.offsetWidth, sh = box.offsetHeight, sx = e.clientX, sy = e.clientY;
-      winDragging = w;
-      const move = ev => {
-        w.style.width = Math.max(320, Math.min(window.innerWidth - 40, sw + ev.clientX - sx)) + "px";
-        box.style.height = Math.max(96, Math.min(window.innerHeight - 170, sh + ev.clientY - sy)) + "px";
-        winSaveLive();
-      };
-      const up = () => {
-        winDragging = null;
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", up);
-        winSave();
-      };
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", up);
-    });
+    wireGrow(w.querySelector(".grow-box"), w, box, 320);
     $("#desktop").append(w);
     initWindow(w);
   }
@@ -1609,25 +1632,7 @@ function openEditorWin(path, fromWin) {
         }
       }, 400);
     });
-    w.querySelector(".grow-box").addEventListener("pointerdown", e => {
-      e.preventDefault(); e.stopPropagation();
-      focusWin(w);
-      const sw = w.offsetWidth, sh = ta.offsetHeight, sx = e.clientX, sy = e.clientY;
-      winDragging = w;
-      const move = ev => {
-        w.style.width = Math.max(360, Math.min(window.innerWidth - 40, sw + ev.clientX - sx)) + "px";
-        ta.style.height = Math.max(96, Math.min(window.innerHeight - 170, sh + ev.clientY - sy)) + "px";
-        winSaveLive();
-      };
-      const up = () => {
-        winDragging = null;
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", up);
-        winSave();
-      };
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", up);
-    });
+    wireGrow(w.querySelector(".grow-box"), w, ta, 360);
     $("#desktop").append(w);
     initWindow(w);
   }
@@ -2021,28 +2026,7 @@ async function streamLog() {
   st.textContent = "disconnected — reconnecting…";
   logRetry = setTimeout(streamLog, 3000);
 }
-$("#log-grow").addEventListener("pointerdown", e => {
-  e.preventDefault(); e.stopPropagation();
-  const w = $("#win-log"), out = $("#log-out");
-  focusWin(w);
-  const sw = w.offsetWidth, sh = out.offsetHeight, sx = e.clientX, sy = e.clientY;
-  const stick = out.scrollHeight - out.scrollTop - out.clientHeight < 4;
-  winDragging = w;
-  const move = ev => {
-    w.style.width = Math.max(380, Math.min(window.innerWidth - 40, sw + ev.clientX - sx)) + "px";
-    out.style.height = Math.max(96, Math.min(window.innerHeight - 170, sh + ev.clientY - sy)) + "px";
-    if (stick) out.scrollTop = out.scrollHeight;
-    winSaveLive();
-  };
-  const up = () => {
-    winDragging = null;
-    window.removeEventListener("pointermove", move);
-    window.removeEventListener("pointerup", up);
-    winSave();
-  };
-  window.addEventListener("pointermove", move);
-  window.addEventListener("pointerup", up);
-});
+wireGrow($("#log-grow"), $("#win-log"), $("#log-out"), 380, { stickEl: $("#log-out") });
 
 // ---- agent ----
 $("#a-run").onclick = async () => {
