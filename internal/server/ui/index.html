@@ -374,20 +374,29 @@ td .mono, td.mono { user-select: text; }
 /* ---------- chat window ---------- */
 .chat-wrap { display: flex; gap: 10px; height: 432px; }
 .chat-side { width: 190px; flex: none; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
-.chat-sessions { flex: 1; max-height: none; overflow: auto; }
+.chat-sessions { flex: 1; max-height: none; overflow-y: auto; }
 .cs-item { display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 8px; border-bottom: 1px solid #efefef; }
 .cs-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cs-time { font-size: 10px; color: #777; }
 .cs-item.sel { background: var(--hl); }
 .cs-item.sel .cs-title, .cs-item.sel .cs-time { color: #fff; }
 .chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-/* No border-right: the always-on scrollbar draws its own black outer edge
-   (track, buttons and thumb alike), so a frame border there would double
-   it to 2px — same fix as the Todo app's list. */
-.chat-msgs { flex: 1; overflow-y: scroll; background: #fff; border: 1px solid var(--black);
-  border-right: 0; padding: 10px; user-select: text;
+.chat-msgs { flex: 1; overflow-y: auto; background: #fff; border: 1px solid var(--black);
+  padding: 10px; user-select: text;
   box-shadow: -1px -1px 0 var(--g600), -1px 0 0 var(--g600), 0 -1px 0 var(--g600),
     1px 1px 0 #fff, 1px 0 0 #fff, 0 1px 0 #fff; }
+/* auto scrollbars with a single OS 9 frame line: when the bar is present
+   its own black edge is the line (a border would double it to 2px — the
+   Todo-list fix), and when it is absent the border comes back. autoVBar()
+   toggles the class as content and size change. */
+.has-vbar { border-right: 0; }
+/* same shared-line rule at the bar's bottom end: the second arrow of the
+   pair is a 14px borderless cell (real OS 9, CodeWarrior capture) — its
+   top line is the first arrow's border, its bottom line is the frame's
+   border-bottom, and the glyph stays integer-centered in the 14px face */
+.chat-msgs::-webkit-scrollbar-button:vertical:end:increment:enabled,
+.listbox::-webkit-scrollbar-button:vertical:end:increment:enabled {
+  height: 14px; border-top: 0; border-bottom: 0; }
 .msg { margin: 0 0 10px; }
 .msg.user { background: var(--lav); border: 1px solid #99c; padding: 5px 9px; margin-left: 48px;
   white-space: pre-wrap; overflow-wrap: break-word; box-shadow: 1px 1px 0 #99c; }
@@ -1077,6 +1086,17 @@ function wireGrow(grip, w, body, minW, opts = {}) {
   });
 }
 wireGrow($("#chat-grow"), $("#win-chat"), $(".chat-wrap"), 560, { minH: 240, stickEl: $("#chat-msgs") });
+
+// overflow-y:auto scrollers whose frame line must stay single: the border
+// yields to the scrollbar's own black edge whenever the bar is present
+function autoVBar(el) {
+  const upd = () => el.classList.toggle("has-vbar", el.scrollHeight > el.clientHeight);
+  new ResizeObserver(upd).observe(el);
+  new MutationObserver(upd).observe(el, { childList: true, subtree: true, characterData: true });
+  upd();
+}
+autoVBar($("#chat-msgs"));
+autoVBar($("#chat-sessions"));
 
 // ---- window layout: persist + cross-browser sync ----
 // The whole desktop layout (per-window geometry, stacking, shade, and which
