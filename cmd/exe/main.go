@@ -161,18 +161,39 @@ func cmdServe() error {
 	apiHandler := srv.Handler()
 	proxyHandler := px.Handler()
 	errc := make(chan error, 4)
-	serveHTTP := func(h http.Handler, ln net.Listener) *http.Server {
+	serveHTTP := func(h http.Handler, lns ...net.Listener) *http.Server {
 		hs := &http.Server{Handler: h}
-		go func() {
-			if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				errc <- err
-			}
-		}()
+		for _, ln := range lns {
+			go func() {
+				if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					errc <- err
+				}
+			}()
+		}
 		return hs
+	}
+	// bindAPI binds addr plus, when addr names a specific non-loopback IP
+	// (e.g. a Tailscale address), a 127.0.0.1 companion on the same port —
+	// the CLI, local agents and skill.md consumers on this machine keep
+	// working no matter where the API is published.
+	bindAPI := func(addr string, wait time.Duration) ([]net.Listener, error) {
+		ln, err := listenRetry(addr, wait)
+		if err != nil {
+			return nil, err
+		}
+		lns := []net.Listener{ln}
+		if lo := loopbackAddr(addr); lo != "" {
+			if ln2, lerr := listenRetry(lo, wait); lerr != nil {
+				log.Printf("api: %s not bound (%v) — API is only on %s", lo, lerr, addr)
+			} else {
+				lns = append(lns, ln2)
+			}
+		}
+		return lns, nil
 	}
 	// Retry binds briefly: after POST /v1/daemon/restart the parent process
 	// is still releasing these ports while we come up.
-	apiLn, err := listenRetry(cfg.Listen, 15*time.Second)
+	apiLns, err := bindAPI(cfg.Listen, 15*time.Second)
 	if err != nil {
 		return err
 	}
@@ -182,7 +203,7 @@ func cmdServe() error {
 	}
 	var srvMu sync.Mutex // guards apiSrv/proxySrv/sshLn/cur* across rebinds and shutdown
 	curListen, curProxy := cfg.Listen, cfg.ProxyListen
-	apiSrv := serveHTTP(apiHandler, apiLn)
+	apiSrv := serveHTTP(apiHandler, apiLns...)
 	proxySrv := serveHTTP(proxyHandler, proxyLn)
 
 	// SSH gate (lobby + direct VM ssh); its sessions live independently of
@@ -227,17 +248,24 @@ func cmdServe() error {
 
 	// Re-bind a listener in place when listen/proxy_listen change via
 	// PUT /v1/config — VMs live in this process and are untouched.
-	rebindOne := func(name string, hs **http.Server, h http.Handler, cur *string, next string) {
+	bindPlain := func(addr string, wait time.Duration) ([]net.Listener, error) {
+		ln, err := listenRetry(addr, wait)
+		if err != nil {
+			return nil, err
+		}
+		return []net.Listener{ln}, nil
+	}
+	rebindOne := func(name string, hs **http.Server, h http.Handler, cur *string, next string, bind func(string, time.Duration) ([]net.Listener, error)) {
 		if next == *cur {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		(*hs).Shutdown(ctx)
 		cancel()
-		ln, err := listenRetry(next, 10*time.Second)
+		lns, err := bind(next, 10*time.Second)
 		if err != nil {
 			log.Printf("rebind %s to %s failed: %v — keeping %s", name, next, err, *cur)
-			ln, err = listenRetry(*cur, 10*time.Second)
+			lns, err = bind(*cur, 10*time.Second)
 			if err != nil {
 				errc <- fmt.Errorf("rebind %s: lost both %s and %s: %v", name, next, *cur, err)
 				return
@@ -246,19 +274,22 @@ func cmdServe() error {
 			*cur = next
 			log.Printf("%s rebound to %s", name, *cur)
 		}
-		*hs = serveHTTP(h, ln)
+		*hs = serveHTTP(h, lns...)
 	}
 	srv.OnRebind = func(newListen, newProxy, newSSH string) {
 		go func() {
 			time.Sleep(300 * time.Millisecond) // let the PUT response drain first
 			srvMu.Lock()
 			defer srvMu.Unlock()
-			rebindOne("api", &apiSrv, apiHandler, &curListen, newListen)
-			rebindOne("proxy", &proxySrv, proxyHandler, &curProxy, newProxy)
+			rebindOne("api", &apiSrv, apiHandler, &curListen, newListen, bindAPI)
+			rebindOne("proxy", &proxySrv, proxyHandler, &curProxy, newProxy, bindPlain)
 			rebindSSH(newSSH)
 		}()
 	}
 	log.Printf("exe daemon: API http://%s, proxy %s, state %s", displayAddr(cfg.Listen), cfg.ProxyListen, stateDir)
+	if len(apiLns) > 1 {
+		log.Printf("api: also on http://%s", apiLns[1].Addr())
+	}
 	if ip := server.TailscaleIP(); ip != "" {
 		log.Printf("tailscale: %s", ip)
 	}
@@ -326,6 +357,20 @@ func portOf(addr string) string {
 		return addr[i+1:]
 	}
 	return addr
+}
+
+// loopbackAddr returns "127.0.0.1:<port>" when addr names a specific
+// non-loopback host (a Tailscale or LAN IP), so the API stays reachable from
+// this machine; "" when addr already covers loopback (wildcard or 127.x).
+func loopbackAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || host == "" || host == "localhost" {
+		return ""
+	}
+	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsUnspecified()) {
+		return ""
+	}
+	return net.JoinHostPort("127.0.0.1", port)
 }
 
 func listenRetry(addr string, wait time.Duration) (net.Listener, error) {

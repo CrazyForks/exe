@@ -128,7 +128,7 @@ daemon). In headless sessions (ssh) the daemon runs without the icon.
 
 | key | meaning |
 |---|---|
-| `listen` | API address. `127.0.0.1:7777` default; bind your Tailscale IP (e.g. `100.120.160.126:7777`) to drive it from your phone |
+| `listen` | API address. `127.0.0.1:7777` default; bind your Tailscale IP (e.g. `100.120.160.126:7777`) to drive it from your phone. When bound to a specific non-loopback IP, the API also stays on `127.0.0.1:<port>` |
 | `proxy_listen` | reverse-proxy address the tunnel forwards to (default `:8090`) |
 | `ssh_listen` | SSH gate address (default `:2222`): `ssh -p 2222 exe@mac` = lobby, `ssh -p 2222 <vm>@mac` = the VM. `"off"` disables |
 | `advertise_host` | this Mac as reachable **from the cloudflared host** — LAN IP (e.g. `192.168.1.131`) or Tailscale IP |
