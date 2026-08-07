@@ -5,7 +5,6 @@ package vmm
 import (
 	"context"
 	"fmt"
-	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -137,25 +136,6 @@ func waitIP(ctx context.Context, mac, vmName string, exclude map[string]bool, ti
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case <-time.After(2 * time.Second):
-		}
-	}
-}
-
-func waitTCP(ctx context.Context, addr string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for {
-		c, err := net.DialTimeout("tcp", addr, 3*time.Second)
-		if err == nil {
-			c.Close()
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("timed out after %s", timeout)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
 		case <-time.After(2 * time.Second):
 		}
 	}

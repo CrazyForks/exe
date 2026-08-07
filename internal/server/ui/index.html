@@ -2332,6 +2332,13 @@ const CONFIG_FIELDS = [
     { path: "default_memory_mb", num: true },
     { path: "default_disk_gb", num: true },
   ]},
+  { group: "Firecracker", fields: [
+    { path: "firecracker.binary", restart: true },
+    { path: "firecracker.kernel_url", restart: true },
+    { path: "firecracker.network_helper", restart: true },
+    { path: "firecracker.network_cidr", restart: true },
+    { path: "firecracker.outbound_interface", restart: true, hint: "empty uses the default route" },
+  ]},
   { group: "Ollama", fields: [
     { path: "ollama.base_url", hint: "local daemon or https://ollama.com" },
     { path: "ollama.api_key", secret: true },

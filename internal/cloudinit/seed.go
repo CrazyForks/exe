@@ -25,31 +25,33 @@ users:
 ssh_pwauth: false
 disable_root: true
 package_update: false
-growpart:
-  mode: auto
-  devices: ["/"]
-`
+%[4]s`
 
 // BuildSeed writes a cloud-init NoCloud seed ISO (volume label "cidata")
 // that creates a sudo-capable user with the given SSH key.
 func BuildSeed(path, hostname, user, authorizedKey string) error {
+	return BuildSeedWithNetwork(path, hostname, user, authorizedKey, "")
+}
+
+// BuildSeedWithNetwork optionally adds a NoCloud network-config document.
+func BuildSeedWithNetwork(path, hostname, user, authorizedKey, networkConfig string) error {
 	w, err := iso9660.NewWriter()
 	if err != nil {
 		return err
 	}
 	defer w.Cleanup()
 
-	nonce := make([]byte, 4)
-	rand.Read(nonce)
-	userData := fmt.Sprintf(userDataTmpl, hostname, user, authorizedKey)
-	metaData := fmt.Sprintf("instance-id: iid-%s-%s\nlocal-hostname: %s\n",
-		hostname, hex.EncodeToString(nonce), hostname)
-
+	userData, metaData := Documents(hostname, user, authorizedKey, true)
 	if err := w.AddFile(strings.NewReader(userData), "user-data"); err != nil {
 		return err
 	}
 	if err := w.AddFile(strings.NewReader(metaData), "meta-data"); err != nil {
 		return err
+	}
+	if networkConfig != "" {
+		if err := w.AddFile(strings.NewReader(networkConfig), "network-config"); err != nil {
+			return err
+		}
 	}
 	f, err := os.Create(path)
 	if err != nil {
@@ -57,4 +59,23 @@ func BuildSeed(path, hostname, user, authorizedKey string) error {
 	}
 	defer f.Close()
 	return w.WriteTo(f, "cidata")
+}
+
+// Documents returns the NoCloud user-data and meta-data documents. growDisk is
+// true for whole-disk EFI images and false for Firecracker rootfs images that
+// the host has already resized.
+func Documents(hostname, user, authorizedKey string, growDisk bool) (string, string) {
+	nonce := make([]byte, 4)
+	_, _ = rand.Read(nonce)
+	diskConfig := `growpart:
+  mode: auto
+  devices: ["/"]
+`
+	if !growDisk {
+		diskConfig = "growpart:\n  mode: 'off'\nresize_rootfs: false\n"
+	}
+	userData := fmt.Sprintf(userDataTmpl, hostname, user, authorizedKey, diskConfig)
+	metaData := fmt.Sprintf("instance-id: iid-%s-%s\nlocal-hostname: %s\n",
+		hostname, hex.EncodeToString(nonce), hostname)
+	return userData, metaData
 }

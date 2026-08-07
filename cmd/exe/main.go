@@ -123,10 +123,18 @@ func cmdServe() error {
 		return err
 	}
 	mgr, err := vmm.New(vmm.Options{
-		StateDir:      stateDir,
-		ImageURL:      cfg.ImageURL,
-		SSHUser:       cfg.SSHUser,
-		AuthorizedKey: pubKey,
+		StateDir:       stateDir,
+		ImageURL:       cfg.ImageURL,
+		SSHUser:        cfg.SSHUser,
+		AuthorizedKey:  pubKey,
+		PrivateKeyPath: privKey,
+		Firecracker: vmm.FirecrackerOptions{
+			Binary:            cfg.Firecracker.Binary,
+			KernelURL:         cfg.Firecracker.KernelURL,
+			NetworkHelper:     cfg.Firecracker.NetworkHelper,
+			NetworkCIDR:       cfg.Firecracker.NetworkCIDR,
+			OutboundInterface: cfg.Firecracker.OutboundInterface,
+		},
 	})
 	if err != nil {
 		return err

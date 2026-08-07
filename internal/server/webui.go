@@ -191,6 +191,11 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 	for _, f := range []struct{ name, oldV, newV string }{
 		{"ssh_user", old.SSHUser, nc.SSHUser},
 		{"image_url", old.ImageURL, nc.ImageURL},
+		{"firecracker.binary", old.Firecracker.Binary, nc.Firecracker.Binary},
+		{"firecracker.kernel_url", old.Firecracker.KernelURL, nc.Firecracker.KernelURL},
+		{"firecracker.network_helper", old.Firecracker.NetworkHelper, nc.Firecracker.NetworkHelper},
+		{"firecracker.network_cidr", old.Firecracker.NetworkCIDR, nc.Firecracker.NetworkCIDR},
+		{"firecracker.outbound_interface", old.Firecracker.OutboundInterface, nc.Firecracker.OutboundInterface},
 	} {
 		if f.oldV != f.newV {
 			restart = append(restart, f.name)

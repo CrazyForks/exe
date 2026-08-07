@@ -42,12 +42,6 @@ func New(opts Options) (Manager, error) {
 	return &vzManager{opts: opts, running: map[string]*vz.VirtualMachine{}}, nil
 }
 
-type vmMeta struct {
-	Spec      Spec      `json:"spec"`
-	MAC       string    `json:"mac"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
 func (m *vzManager) vmDir(name string) string {
 	return filepath.Join(m.opts.StateDir, "vms", name)
 }

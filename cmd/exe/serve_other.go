@@ -2,9 +2,26 @@
 
 package main
 
-import "exe/internal/server"
+import (
+	"context"
+	"log"
+	"strings"
+	"time"
 
-// serveWait blocks until the daemon stops; only macOS adds a menu bar icon.
+	"exe/internal/server"
+)
+
+// serveWait blocks until the daemon stops. Linux VMs are child processes, so
+// shut them down before returning and triggering Firecracker's parent-death
+// fallback.
 func serveWait(srv *server.Server, wait func() error, shutdown func()) error {
-	return wait()
+	err := wait()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if running := srv.RunningVMNames(ctx); len(running) > 0 {
+		log.Printf("daemon shutdown: stopping %s", strings.Join(running, ", "))
+		srv.StopVMs(ctx, running)
+	}
+	shutdown()
+	return err
 }

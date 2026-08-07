@@ -1,16 +1,16 @@
-# exe — a personal VM cloud on your Mac
+# exe — a personal VM cloud
 
 A single Go binary inspired by [exe.dev](https://exe.dev): create persistent Linux VMs on
-macOS (Apple Virtualization.framework), vibecode inside them with models from
-Ollama Cloud, and publish any VM port to a real HTTPS subdomain through your
-Cloudflare Tunnel.
+macOS or Linux, vibecode inside them with models from Ollama Cloud, and publish
+any VM port to a real HTTPS subdomain through your Cloudflare Tunnel. macOS
+uses Virtualization.framework; Linux uses KVM through Firecracker.
 
 ![The web UI — a Mac OS 9 Platinum desktop: sortable VM list and an SSH terminal into a VM](docs/screenshot.png)
 
 ```
 phone/laptop ──► exe API (bind to Tailscale IP)
                     │
-                    ├── VMs  (Virtualization.framework, NAT, cloud-init, SSH)
+                    ├── VMs  (Virtualization.framework or Firecracker, cloud-init, SSH)
                     │     └── agent: Ollama (glm-5.2, …) drives bash/write/read over SSH
                     │
                     ├── SSH gate :2222  (ssh exe@mac = lobby, ssh <vm>@mac = the VM)
@@ -22,18 +22,46 @@ phone/laptop ──► exe API (bind to Tailscale IP)
 ## Quick start
 
 ```sh
-make build        # builds ./exe and codesigns it with the virtualization entitlement
+make build        # also builds exe-net-helper on Linux
 ./exe init        # writes ~/.exe/config.json
-./exe serve       # run the daemon (keep it running; VMs live inside this process)
+./exe serve       # run the daemon
 
-./exe create demo               # ~7s: APFS-clone Debian 13, boot, cloud-init, SSH ready
+./exe create demo               # clone Debian 13, boot, cloud-init, SSH ready
 ./exe ssh demo                  # log in (key in ~/.exe/ssh/)
 ./exe code demo "build me a guestbook app on port 8000"
 ./exe expose demo -port 8000 -sub guestbook   # -> https://guestbook.<domain>
 ```
 
 The first `create` downloads the Debian 13 `genericcloud` raw image (~3 GB) once
-into `~/.exe/images/`.
+into `~/.exe/images/`. Linux also downloads the configured direct-boot kernel.
+
+### Linux requirements
+
+- An amd64 or arm64 host with hardware virtualization and `/dev/kvm`.
+- Firecracker on `PATH`, plus `ip`, `iptables`, `debugfs`, and `resize2fs`.
+- The daemon user must belong to the `kvm` group. Restrict the network helper's
+  execute permission to root and the daemon user's group.
+- The root-owned `exe-net-helper` must have only `CAP_NET_ADMIN`. It
+  validates private /30 subnets, deterministic `exe-*` TAP names, the caller
+  uid, and outbound interface names. Privileged child tools are resolved only
+  from root-owned system directories and run with a minimal environment.
+
+For the Supervisor deployment in this repository:
+
+```sh
+sudo usermod -aG kvm livid
+make build
+sudo install -o root -g livid -m 0750 exe-net-helper /usr/local/libexec/exe-net-helper
+sudo setcap cap_net_admin=ep /usr/local/libexec/exe-net-helper
+sudo install -m 0644 deploy/supervisor/exe.conf /etc/supervisor/conf.d/exe.conf
+sudo supervisorctl reread
+sudo supervisorctl update
+```
+
+Install Firecracker from its official release archive before starting the
+service. Reapply `setcap` whenever the helper binary is replaced. The
+checked-in Supervisor config is specific to `/www/exe` and
+`/home/livid/.exe`.
 
 ## SSH as an interface (:2222)
 
@@ -96,7 +124,12 @@ daemon). In headless sessions (ssh) the daemon runs without the icon.
 | `advertise_host` | this Mac as reachable **from the cloudflared host** — LAN IP (e.g. `192.168.1.131`) or Tailscale IP |
 | `api_token` | if set, every API call needs `Authorization: Bearer <token>`. Set it before binding beyond localhost |
 | `ssh_user` | user created in each VM (default `dev`, passwordless sudo) |
-| `image_url` | base image; any raw-format cloud image with cloud-init works |
+| `image_url` | base image; macOS accepts raw cloud images, while Linux accepts a raw ext4 filesystem or a GPT image containing an ext4 root partition |
+| `firecracker.binary` | Linux Firecracker executable (default `firecracker` from `PATH`) |
+| `firecracker.kernel_url` | Linux direct-boot kernel URL, selected for the host architecture |
+| `firecracker.network_helper` | root-owned, capability-limited helper path |
+| `firecracker.network_cidr` | private IPv4 pool divided into one /30 per VM (default `172.30.0.0/16`) |
+| `firecracker.outbound_interface` | Linux egress interface; empty auto-detects the default IPv4 route |
 | `ollama.base_url` | `http://127.0.0.1:11434` to go through your signed-in local Ollama (cloud models like `glm-5.2:cloud` need no key), or `https://ollama.com` + `ollama.api_key` |
 | `ollama.model` | default agent model, e.g. `glm-5.2:cloud` |
 | `cloudflare.*` | see below |
@@ -120,28 +153,42 @@ and routes that hostname in the local proxy to `http://<vm_ip>:N`.
 
 ## How VMs work
 
-- Debian 13 arm64 raw cloud image, APFS copy-on-write clone per VM (instant, thin).
-- EFI boot, virtio disk/net/console/entropy; serial console log at `~/.exe/vms/<name>/console.log`.
-- cloud-init NoCloud seed ISO injects the `dev` user + the service SSH key and grows the disk.
-- NAT networking via the shared macOS DHCP (`bootpd`); IPs are discovered from
-  `/var/db/dhcpd_leases`, matching by MAC or, for DUID-identifying clients
-  (Debian 13's dhcpcd), by lease name with a pre-boot snapshot to skip stale entries.
-- **VMs run inside the `exe serve` process** — quit the daemon and they power off
-  (disks persist; `exe start` boots them again). Run the daemon under `launchd`
-  or in tmux for long-lived VMs.
+The default image is Debian 13 `genericcloud`. Each VM gets a persistent sparse
+disk, the `dev` user, and the service SSH key through cloud-init NoCloud.
+
+On macOS, VMs use EFI and virtio disk/net/console/entropy through
+Virtualization.framework. NAT comes from the shared macOS DHCP (`bootpd`);
+IPs are discovered from `/var/db/dhcpd_leases`, matching by MAC or, for
+DUID-identifying clients (Debian 13's dhcpcd), by lease name with a pre-boot
+snapshot to skip stale entries.
+
+On Linux, exe extracts the ext4 root partition from the default GPT cloud
+image, resizes it offline, and uses it as Firecracker's single `/dev/vda` root
+drive. It injects persistent systemd-networkd and NoCloud data directly into
+that filesystem, then direct-boots the configured kernel and connects a per-VM
+TAP to host NAT. Custom images must either be raw ext4 filesystems or GPT images
+with an ext4 root partition, and must support the configured kernel. Firecracker
+serial output is at `~/.exe/vms/<name>/console.log`.
+
+VMs are children of `exe serve`. An exclusive state lock prevents two Linux
+daemons from managing the same VM directory. Graceful daemon shutdown powers
+VMs off; parent-death handling terminates Firecracker if the daemon crashes,
+and the next daemon startup removes stale per-VM TAP and firewall state. Disks
+persist and `exe start` boots them again.
 
 ## Security notes
 
-- VMs are reachable only from this Mac (NAT); the proxy is what exposes them.
+- VMs have private host-local addresses; the proxy is what exposes their services.
 - Set `api_token` before binding the API beyond localhost.
 - The agent has passwordless sudo **inside the VM** — that's the sandbox boundary.
+- On Linux, the daemon and Firecracker are unprivileged. Only the validated
+  network helper has `CAP_NET_ADMIN`; it is root-owned and not daemon-writable.
 - The SSH gate accepts only keys it already knows (service key, your
   `~/.ssh/*.pub`, `~/.exe/ssh/authorized_clients`) — there is no
   first-come key adoption, so it's safe to leave on `:2222` on a LAN.
 
 ## Roadmap / ideas
 
-- Linux backend (KVM via cloud-hypervisor or QEMU) behind the same `vmm.Manager` interface.
 - `exe unexpose` currently leaves the Cloudflare DNS record + ingress rule in place.
 - Snapshots (`SaveMachineStateToPath` is already in vz), memory ballooning, virtiofs shares.
 - Auto-restart VMs that were running when the daemon exited.

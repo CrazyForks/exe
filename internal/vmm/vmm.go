@@ -1,13 +1,12 @@
 // Package vmm manages virtual machines behind a platform-neutral interface.
-// The only implementation today uses Apple's Virtualization.framework
-// (darwin); a Linux backend (KVM via cloud-hypervisor/QEMU) can be added as
-// another build-tagged file implementing Manager.
+// macOS uses Virtualization.framework and Linux uses KVM through Firecracker.
 package vmm
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"time"
 )
@@ -46,10 +45,35 @@ type ImageEnsurer interface {
 }
 
 type Options struct {
-	StateDir      string
-	ImageURL      string
-	SSHUser       string
-	AuthorizedKey string
+	StateDir       string
+	ImageURL       string
+	SSHUser        string
+	AuthorizedKey  string
+	PrivateKeyPath string
+	Firecracker    FirecrackerOptions
+}
+
+type FirecrackerOptions struct {
+	Binary            string
+	KernelURL         string
+	NetworkHelper     string
+	NetworkCIDR       string
+	OutboundInterface string
+}
+
+type vmNetwork struct {
+	Tap               string `json:"tap"`
+	HostIP            string `json:"host_ip"`
+	GuestIP           string `json:"guest_ip"`
+	PrefixLen         int    `json:"prefix_len"`
+	OutboundInterface string `json:"outbound_interface,omitempty"`
+}
+
+type vmMeta struct {
+	Spec      Spec       `json:"spec"`
+	MAC       string     `json:"mac"`
+	CreatedAt time.Time  `json:"created_at"`
+	Network   *vmNetwork `json:"network,omitempty"`
 }
 
 var (
@@ -64,4 +88,23 @@ func ValidateName(name string) error {
 		return fmt.Errorf("invalid vm name %q (use lowercase letters, digits, hyphens)", name)
 	}
 	return nil
+}
+
+func waitTCP(ctx context.Context, addr string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		c, err := net.DialTimeout("tcp", addr, 3*time.Second)
+		if err == nil {
+			c.Close()
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %s", timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
 }

@@ -13,6 +13,8 @@ import (
 
 const defaultImageURLTmpl = "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-%s.raw"
 
+const defaultFirecrackerKernelURLTmpl = "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20260805-f2f43b669a02-0/%s/vmlinux-6.18.39"
+
 type OllamaConfig struct {
 	BaseURL string `json:"base_url"`
 	APIKey  string `json:"api_key"`
@@ -25,6 +27,19 @@ type CloudflareConfig struct {
 	ZoneID    string `json:"zone_id"`
 	TunnelID  string `json:"tunnel_id"`
 	Domain    string `json:"domain"`
+}
+
+type FirecrackerConfig struct {
+	// Binary is either a command on PATH or an absolute path.
+	Binary string `json:"binary"`
+	// KernelURL is the direct-boot Linux kernel downloaded for Firecracker VMs.
+	KernelURL string `json:"kernel_url"`
+	// NetworkHelper is the root-owned helper granted only CAP_NET_ADMIN.
+	NetworkHelper string `json:"network_helper"`
+	// NetworkCIDR is divided into one /30 subnet per VM.
+	NetworkCIDR string `json:"network_cidr"`
+	// OutboundInterface is auto-detected from the default route when empty.
+	OutboundInterface string `json:"outbound_interface"`
 }
 
 type Config struct {
@@ -51,8 +66,9 @@ type Config struct {
 	DefaultMemoryMB int `json:"default_memory_mb"`
 	DefaultDiskGB   int `json:"default_disk_gb"`
 
-	Ollama     OllamaConfig     `json:"ollama"`
-	Cloudflare CloudflareConfig `json:"cloudflare"`
+	Ollama      OllamaConfig      `json:"ollama"`
+	Cloudflare  CloudflareConfig  `json:"cloudflare"`
+	Firecracker FirecrackerConfig `json:"firecracker"`
 }
 
 // Dir returns the state directory (~/.exe, or $EXE_HOME).
@@ -71,8 +87,10 @@ func Path() string { return filepath.Join(Dir(), "config.json") }
 
 func Default() *Config {
 	arch := "arm64"
+	firecrackerArch := "aarch64"
 	if runtime.GOARCH == "amd64" {
 		arch = "amd64"
+		firecrackerArch = "x86_64"
 	}
 	return &Config{
 		Listen:          "127.0.0.1:7777",
@@ -86,6 +104,12 @@ func Default() *Config {
 		Ollama: OllamaConfig{
 			BaseURL: "https://ollama.com",
 			Model:   "glm-5.2",
+		},
+		Firecracker: FirecrackerConfig{
+			Binary:        "firecracker",
+			KernelURL:     fmt.Sprintf(defaultFirecrackerKernelURLTmpl, firecrackerArch),
+			NetworkHelper: "/usr/local/libexec/exe-net-helper",
+			NetworkCIDR:   "172.30.0.0/16",
 		},
 	}
 }
@@ -119,6 +143,11 @@ func (c *Config) Normalize() {
 	c.ProxyListen = NormalizeListen(c.ProxyListen)
 	c.SSHListen = NormalizeListen(c.SSHListen)
 	c.AdvertiseHost = strings.TrimSpace(c.AdvertiseHost)
+	c.Firecracker.Binary = strings.TrimSpace(c.Firecracker.Binary)
+	c.Firecracker.KernelURL = strings.TrimSpace(c.Firecracker.KernelURL)
+	c.Firecracker.NetworkHelper = strings.TrimSpace(c.Firecracker.NetworkHelper)
+	c.Firecracker.NetworkCIDR = strings.TrimSpace(c.Firecracker.NetworkCIDR)
+	c.Firecracker.OutboundInterface = strings.TrimSpace(c.Firecracker.OutboundInterface)
 }
 
 // Load reads config.json over the defaults; secrets can also come from

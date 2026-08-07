@@ -1,14 +1,22 @@
 BINARY := exe
+UNAME_S := $(shell uname -s)
 
 .PHONY: build install clean
 
 build:
 	CGO_ENABLED=1 go build -o $(BINARY) ./cmd/exe
+
+ifeq ($(UNAME_S),Linux)
+	CGO_ENABLED=0 go build -o exe-net-helper ./cmd/exe-net-helper
+endif
+
+ifeq ($(UNAME_S),Darwin)
 	codesign --entitlements vz.entitlements --force -s - $(BINARY)
+endif
 
 install: build
 	mkdir -p $(HOME)/bin
 	cp $(BINARY) $(HOME)/bin/$(BINARY)
 
 clean:
-	rm -f $(BINARY)
+	rm -f $(BINARY) exe-net-helper
