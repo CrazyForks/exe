@@ -159,6 +159,16 @@ a { color: #202a87; text-decoration: underline; }
 .doc-scroll::-webkit-scrollbar-button:horizontal:end:increment:enabled { width: 14px; border-left: 0; border-right: 0; }
 .doc-scroll::-webkit-scrollbar-button:vertical:disabled { border-right: 0; }
 .doc-scroll::-webkit-scrollbar-button:horizontal:disabled { border-bottom: 0; }
+/* vertical-only flush scroller (Daemon Log text, Terminal viewports):
+   content runs edge to edge, so the 15px bar's trailing line is the
+   win-frame border and the enabled end pair shares the statusbar's top
+   line — every seam stays a single 1px line */
+.vflush::-webkit-scrollbar { width: 15px; }
+.vflush::-webkit-scrollbar-track:vertical { border-right: 0; }
+.vflush::-webkit-scrollbar-thumb:vertical { border-right: 0; }
+.vflush::-webkit-scrollbar-button:vertical { border-right: 0; }
+.vflush::-webkit-scrollbar-button:vertical:disabled { border-right: 0; }
+.vflush::-webkit-scrollbar-button:vertical:end:increment:enabled { height: 14px; border-top: 0; border-bottom: 0; }
 
 /* Workspace window: Finder icon view over ~/.exe/workspace */
 .finder-status { background: var(--g300); border-bottom: 1px solid var(--black);
@@ -339,7 +349,10 @@ pre.out { background: #10120f; color: #cfe3cf; border: 1px solid var(--black); p
    classic IE/Netscape. 15px total (border-box) so the strip's border-top
    is the same line as the grow box tile's top separator row. */
 #win-log .statusbar, #win-chat .statusbar, .term-window .statusbar { height: 15px; padding: 0 25px 0 8px; }
-#log-out { margin: 0; height: 380px; max-height: none; }
+/* edge to edge in the frame: the win-frame draws the outline, the pre
+   keeps only its inner text padding, and only a vertical bar renders */
+#log-out { margin: 0; height: 380px; max-height: none; border: 0; box-shadow: none;
+  overflow-y: scroll; overflow-x: hidden; }
 /* sunken white list, like a Finder list view */
 .listbox { background: #fff; border: 1px solid var(--black); max-height: 240px; overflow: auto;
   box-shadow: -1px -1px 0 var(--g600), -1px 0 0 var(--g600), 0 -1px 0 var(--g600),
@@ -359,7 +372,15 @@ a.svc:hover { text-decoration: underline; }
    scroll .win-body to chase the focused hidden textarea. clip (not hidden)
    also forbids programmatic scrolling of the frame itself. */
 #term-box, .hostterm-box { height: 380px; background: #000; border: 1px solid var(--black);
+  border-right: 0; /* the always-on viewport scrollbar draws the right frame line */
   box-shadow: -1px -1px 0 var(--g600), 1px 1px 0 #fff; overflow: clip; }
+/* enabled end arrows share lines too: borderless 14px second arrow rides
+   the box's border-bottom (see the chat lists / CodeWarrior capture) */
+#term-box .xterm-viewport::-webkit-scrollbar-button:vertical:end:increment:enabled {
+  height: 14px; border-top: 0; border-bottom: 0; }
+/* Terminal windows are edge to edge: the win-frame draws the outline and
+   the viewport scrollbar is the .vflush 15px flush variant */
+.hostterm-box { border: 0; box-shadow: none; }
 /* Text inset lives on .xterm, not the box: FitAddon subtracts element padding
    when sizing rows, but the absolutely-positioned viewport anchors to the
    padding box — so the scrollbar runs flush to the frame, OS 9 style. */
@@ -751,8 +772,8 @@ td .mono, td.mono { user-select: text; }
       <div class="title">Daemon Log</div>
       <div class="stripe"></div><button class="tbox zoom"></button><button class="tbox shade"></button></div>
     <div class="win-frame">
-      <div class="win-body" style="padding:8px">
-        <pre class="out" id="log-out"></pre>
+      <div class="win-body" style="padding:0">
+        <pre class="out vflush" id="log-out"></pre>
       </div>
       <div class="statusbar">
         <span id="log-status">…</span>
@@ -1977,7 +1998,7 @@ $("#term-open").onclick = () => {
   box.hidden = false;
   term = new Terminal({
     fontSize: 12, cursorBlink: true,
-    fontFamily: '"Monaco", ui-monospace, SFMono-Regular, Menlo, monospace',
+    fontFamily: '"MesloLGS NF", "Monaco", ui-monospace, SFMono-Regular, Menlo, monospace',
     theme: { background: "#000000" },
   });
   fitAddon = new FitAddon.FitAddon();
@@ -2021,7 +2042,7 @@ function openHostTermWin() {
     <div class="title"></div>
     <div class="stripe"></div><button class="tbox zoom"></button><button class="tbox shade"></button></div>
     <div class="win-frame">
-      <div class="win-body" style="padding:8px"><div class="hostterm-box"></div></div>
+      <div class="win-body" style="padding:0"><div class="hostterm-box"></div></div>
       <div class="statusbar"><span class="term-status">…</span></div>
       ${GROW_TILE}
     </div>`;
@@ -2034,12 +2055,13 @@ function openHostTermWin() {
 
   const term = new Terminal({
     fontSize: 12, cursorBlink: true,
-    fontFamily: '"Monaco", ui-monospace, SFMono-Regular, Menlo, monospace',
+    fontFamily: '"MesloLGS NF", "Monaco", ui-monospace, SFMono-Regular, Menlo, monospace',
     theme: { background: "#000000" },
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(box);
+  box.querySelector(".xterm-viewport").classList.add("vflush");
   fit.fit();
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const tok = tokenInput.value ? "?token=" + encodeURIComponent(tokenInput.value) : "";
