@@ -109,6 +109,16 @@ http://127.0.0.1:7777). It can:
 If `api_token` is set, paste it into the token field in the header (stored in
 localStorage). Bind `listen` to your Tailscale IP to use the UI from your phone.
 
+## Agent skill guide (/skill.md)
+
+The daemon also serves `http://<listen>/skill.md`
+([source](internal/server/skill.md)): a self-contained guide any coding agent
+(Claude Code, Codex, opencode, …) can fetch to learn the API — VM lifecycle
+over HTTP, running commands over the SSH gate, service discovery, and
+exposing ports. Point an agent at that URL (plus the `api_token` if set) and
+it can drive your VMs; the file also works dropped into a skills directory
+as-is.
+
 While `exe serve` runs it also puts an icon in the macOS menu bar: **Open Web
 UI**, **Restart Daemon** (running VMs are brought back automatically), and
 **Quit exe** (asks for confirmation, then shuts down running VMs and the

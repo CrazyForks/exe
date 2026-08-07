@@ -24,6 +24,16 @@ import (
 //go:embed ui/index.html
 var uiHTML []byte
 
+//go:embed skill.md
+var skillMD []byte
+
+// handleSkill serves the agent skill guide: a markdown file any coding agent
+// can fetch to learn how to drive this daemon's API and VMs.
+func handleSkill(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Write(skillMD)
+}
+
 //go:embed all:ui
 var uiFS embed.FS
 

@@ -557,6 +557,7 @@ td .mono, td.mono { user-select: text; }
   <div class="menu" data-m="file">File</div>
   <div class="menu" data-m="windows">Windows</div>
   <div class="menu" data-m="special">Special</div>
+  <div class="menu" data-m="help">Help</div>
   <div class="mb-right">
     <button id="cf-dot" title="Cloudflare status — checking…">
       <span id="cf-dot-circle" class="dot"></span><span>Cloudflare</span>
@@ -585,6 +586,9 @@ td .mono, td.mono { user-select: text; }
   <div class="dd-item" data-act="cfwizard">Cloudflare Setup Wizard…</div>
   <div class="dd-sep"></div>
   <div class="dd-item" data-act="token">Set API Token…</div>
+</div>
+<div class="dropdown" id="dd-help" hidden>
+  <div class="dd-item" data-act="skillguide">Agent Skill Guide…</div>
 </div>
 <div class="dropdown" id="ctx-menu" hidden></div>
 
@@ -869,6 +873,28 @@ td .mono, td.mono { user-select: text; }
           One click later, it's live at a real https address.
         </div>
         <div style="margin-top:12px"><a href="https://github.com/livid/exe" target="_blank" rel="noopener">github.com/livid/exe</a></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Agent Skill Guide (Help menu) -->
+  <div class="window" id="win-skill" style="left:230px; top:80px; width:500px;" hidden>
+    <div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
+      <div class="title">Agent Skill Guide</div>
+      <div class="stripe"></div></div>
+    <div class="win-frame">
+      <div class="win-body">
+        <div style="line-height:1.6">exe serves a skill file that teaches any coding agent
+          — Claude Code, Codex, opencode, … — how to drive this daemon: create VMs, run
+          commands inside them over SSH, and publish their ports. It lives at
+          <a id="skill-url" class="mono" href="/skill.md" target="_blank" rel="noopener"></a>.</div>
+        <div style="margin-top:10px; line-height:1.6">To hand an agent the keys, paste this
+          prompt into it:</div>
+        <textarea id="skill-snippet" readonly rows="8" spellcheck="false" style="margin-top:6px"></textarea>
+        <div class="row" style="justify-content:space-between; margin-top:8px">
+          <span class="muted" id="skill-note"></span>
+          <button class="btn" id="skill-copy">Copy Prompt</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1278,9 +1304,39 @@ const ACTIONS = {
   cfstatus: () => sumOpen(),
   cfwizard: () => wizOpen(false),
   token: () => { openWin("#win-token"); tokenInput.focus(); },
+  skillguide: () => openSkillWin(),
 };
 document.querySelectorAll(".dd-item").forEach(it => {
   it.addEventListener("click", () => { menuClose(); const a = ACTIONS[it.dataset.act]; if (a) a(); });
+});
+
+// ---- Help → Agent Skill Guide ----
+function skillSnippet() {
+  const base = location.origin, host = location.hostname;
+  let s = `Read ${base}/skill.md and follow it. It documents the exe daemon at ${base}: ` +
+    `an HTTP API for creating and managing persistent Linux VMs, an SSH gate for running ` +
+    `commands inside them (ssh -p 2222 <vm>@${host}), and endpoints for discovering and ` +
+    `publishing VM services. When I ask you to build, run, or test something, use one of ` +
+    `these VMs as your sandbox.`;
+  const tok = localStorage.getItem("exe_token");
+  if (tok) s += `\n\nAPI requests need the header: Authorization: Bearer ${tok}`;
+  return s;
+}
+function openSkillWin() {
+  $("#skill-url").textContent = location.origin + "/skill.md";
+  $("#skill-snippet").value = skillSnippet();
+  $("#skill-note").textContent = localStorage.getItem("exe_token")
+    ? "Includes your API token — share carefully." : "";
+  openWin("#win-skill");
+}
+$("#skill-copy").addEventListener("click", async () => {
+  const ta = $("#skill-snippet");
+  ta.focus();
+  ta.select();
+  let ok = false;
+  try { await navigator.clipboard.writeText(ta.value); ok = true; }
+  catch (e) { ok = document.execCommand("copy"); } // plain-http origins have no clipboard API
+  toast(ok ? "Prompt copied" : "Copy failed — copy the selected text manually");
 });
 
 // ---- clock ----

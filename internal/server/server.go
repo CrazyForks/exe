@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/term"
+
 	"exe/internal/agent"
 	"exe/internal/cf"
 	"exe/internal/config"
@@ -77,6 +79,7 @@ func (s *Server) Config() *config.Config { return s.cfg.Load() }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { fmt.Fprintln(w, "ok") })
+	mux.HandleFunc("GET /skill.md", handleSkill)
 	mux.HandleFunc("GET /v1/vms", s.handleList)
 	mux.HandleFunc("POST /v1/vms", s.handleCreate)
 	mux.HandleFunc("GET /v1/vms/{name}", s.handleGet)
@@ -532,7 +535,7 @@ func (s *Server) RestartDaemon(delay time.Duration, running []string) {
 	s.StopVMs(ctx, running)
 	cmd := exec.Command(exePath, os.Args[1:]...)
 	cmd.Env = append(os.Environ(), "EXE_AUTOSTART="+strings.Join(running, ","))
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.Stdout, cmd.Stderr = restartStdio(s.StateDir)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		log.Printf("restart: spawn failed: %v", err)
@@ -540,6 +543,23 @@ func (s *Server) RestartDaemon(delay time.Duration, running []string) {
 	}
 	log.Printf("restart: handing over to pid %d (autostart: %s)", cmd.Process.Pid, strings.Join(running, ","))
 	os.Exit(0)
+}
+
+// restartStdio picks the handed-over daemon's stdout/stderr. Inheriting is
+// only safe when they are a real terminal: under a supervisor they are its
+// log pipe, which the supervisor closes once this process exits, and the
+// child's next write would raise SIGPIPE and kill it. Non-terminal stdio
+// goes to restart.log in the state dir rather than /dev/null so panic
+// traces (which bypass the daemon.log ring) are not lost.
+func restartStdio(stateDir string) (stdout, stderr *os.File) {
+	if term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stderr.Fd())) {
+		return os.Stdout, os.Stderr
+	}
+	f, err := os.OpenFile(filepath.Join(stateDir, "restart.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil, nil // exec.Cmd sends nil stdio to /dev/null
+	}
+	return f, f
 }
 
 // TailscaleIP is this host's Tailscale IPv4, detected as a CGNAT
