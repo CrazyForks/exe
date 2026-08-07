@@ -90,6 +90,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/vms/{name}/expose", s.handleExpose)
 	mux.HandleFunc("GET /v1/vms/{name}/ports", s.handlePorts)
 	mux.HandleFunc("GET /v1/vms/{name}/terminal", s.handleTerminal)
+	mux.HandleFunc("GET /v1/host/terminal", s.handleHostTerminal)
 	mux.HandleFunc("GET /v1/vms/{name}/transcripts", s.handleTranscripts)
 	mux.HandleFunc("GET /v1/vms/{name}/transcripts/{id}", s.handleTranscript)
 	mux.HandleFunc("GET /v1/apps", s.handleApps)

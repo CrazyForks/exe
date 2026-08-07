@@ -338,7 +338,7 @@ pre.out { background: #10120f; color: #cfe3cf; border: 1px solid var(--black); p
    (.grow + .grow-box); the bottom strip is a plain status area like
    classic IE/Netscape. 15px total (border-box) so the strip's border-top
    is the same line as the grow box tile's top separator row. */
-#win-log .statusbar, #win-chat .statusbar { height: 15px; padding: 0 25px 0 8px; }
+#win-log .statusbar, #win-chat .statusbar, .term-window .statusbar { height: 15px; padding: 0 25px 0 8px; }
 #log-out { margin: 0; height: 380px; max-height: none; }
 /* sunken white list, like a Finder list view */
 .listbox { background: #fff; border: 1px solid var(--black); max-height: 240px; overflow: auto;
@@ -358,17 +358,17 @@ a.svc:hover { text-decoration: underline; }
    they inflate every ancestor's scrollHeight and typing makes the browser
    scroll .win-body to chase the focused hidden textarea. clip (not hidden)
    also forbids programmatic scrolling of the frame itself. */
-#term-box { height: 380px; background: #000; border: 1px solid var(--black);
+#term-box, .hostterm-box { height: 380px; background: #000; border: 1px solid var(--black);
   box-shadow: -1px -1px 0 var(--g600), 1px 1px 0 #fff; overflow: clip; }
 /* Text inset lives on .xterm, not the box: FitAddon subtracts element padding
    when sizing rows, but the absolutely-positioned viewport anchors to the
    padding box — so the scrollbar runs flush to the frame, OS 9 style. */
-#term-box .xterm { height: 100%; box-sizing: border-box; padding: 5px; }
+#term-box .xterm, .hostterm-box .xterm { height: 100%; box-sizing: border-box; padding: 5px; }
 /* Always-on scrollbar, like a real OS 9 window: the track is permanent
    (disabled-flat when there is no scrollback) and, because the bar exists
    at open time, xterm measures it and sizes cols short of it — with
    overflow:auto the bar appeared later, over the last column of text. */
-#term-box .xterm-viewport { overflow-y: scroll !important; }
+#term-box .xterm-viewport, .hostterm-box .xterm-viewport { overflow-y: scroll !important; }
 td .mono, td.mono { user-select: text; }
 
 /* ---------- chat window ---------- */
@@ -1018,6 +1018,8 @@ function closeWin(w) {
   if (w.id === "win-detail") { closeTerm(); currentVM = null; }
   if (w.id === "win-newvm") $("#c-status").textContent = "";
   if (w.id === "win-log") stopLogStream();
+  // a closed Terminal is gone for good: end the shell and drop the window
+  if (w.classList.contains("term-window")) { w._teardown(); w.remove(); }
   winSave();
 }
 function closeFrontWindow() {
@@ -1099,6 +1101,7 @@ function wireGrow(grip, w, body, minW, opts = {}) {
       w.style.width = Math.max(minW, Math.min(window.innerWidth - 40, sw + ev.clientX - sx)) + "px";
       body.style.height = Math.max(opts.minH || 96, Math.min(window.innerHeight - 170, sh + ev.clientY - sy)) + "px";
       if (stick) st.scrollTop = st.scrollHeight;
+      if (opts.onMove) opts.onMove();
       winSaveLive();
     };
     const up = () => {
@@ -1150,7 +1153,7 @@ function winSnapshot() {
       z: +w.style.zIndex || 0,
       open: !w.hidden, shaded: w.classList.contains("shaded"),
     };
-    // app, Finder, editor and chat windows are also resizable vertically
+    // app, Finder, editor, chat and terminal windows are also resizable
     const g = w.querySelector(".app-frame, .finder-icons, .ed-text, .chat-wrap");
     if (g) st[w.id].h = parseInt(g.style.height) || g.offsetHeight || 0;
   });
@@ -1377,6 +1380,19 @@ function renderIcons(vms) {
     ic.addEventListener("dblclick", () => openFinderWin(""));
     box.append(ic);
   }
+  {
+    const ic = el("div", { class: "dicon" + (selectedIcon === "hostterm" ? " sel" : ""), title: "Terminal — a shell on this Mac" });
+    ic.innerHTML = TERMINAL_ICON;
+    ic.append(el("span", { class: "lbl" }, "Terminal"));
+    ic.addEventListener("click", e => {
+      e.stopPropagation();
+      selectedIcon = "hostterm";
+      box.querySelectorAll(".dicon").forEach(d => d.classList.remove("sel"));
+      ic.classList.add("sel");
+    });
+    ic.addEventListener("dblclick", () => openHostTermWin());
+    box.append(ic);
+  }
   for (const vm of vms) {
     const ic = el("div", { class: "dicon" + (selectedIcon === vm.name ? " sel" : ""), title: `${vm.name} — ${vm.state}` });
     ic.innerHTML = macIcon(vm.state, 32);
@@ -1422,6 +1438,16 @@ const FOLDER_ICON = `<svg width="32" height="32" viewBox="0 0 32 32" shape-rende
 const DOC_ICON = `<svg width="32" height="32" viewBox="0 0 32 32" shape-rendering="crispEdges">
   <path fill="#fff" stroke="#000" d="M7.5 3.5h11l6 6v19h-17z"/>
   <path fill="#ccc" stroke="#000" d="M18.5 3.5v6h6z"/>
+</svg>`;
+// host Terminal: the compact Mac with a dark screen showing a green prompt
+const TERMINAL_ICON = `<svg width="32" height="32" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <rect x="6.5" y="1.5" width="19" height="24" fill="#DAD5CA" stroke="#000"/>
+  <rect x="9.5" y="4.5" width="13" height="10" fill="#6e6a61" stroke="#000"/>
+  <rect x="10.5" y="5.5" width="11" height="8" fill="#000" stroke="#000"/>
+  <path fill="#3f3" d="M12 7h1v1h-1zM13 8h1v1h-1zM12 9h1v1h-1zM15 9h3v1h-3z"/>
+  <rect x="12" y="18" width="8" height="2" fill="#55524B"/>
+  <rect x="20" y="21" width="3" height="2" fill="#B7B2A7"/>
+  <rect x="9.5" y="25.5" width="13" height="3" fill="#C8C3B8" stroke="#000"/>
 </svg>`;
 async function loadApps() {
   appsList = await j("/v1/apps");
@@ -1978,6 +2004,75 @@ $("#term-open").onclick = () => {
   $("#term-open").hidden = true;
   $("#term-close").hidden = false;
 };
+
+// ---- host Terminal windows: every double-click opens a fresh login shell
+// in its own window, like a real terminal app. Terminal windows are live
+// sessions, so they are never restored from the layout snapshot, and
+// closing one ends its shell and removes the window for good. ----
+let termSeq = 0;
+function openHostTermWin() {
+  const n = ++termSeq;
+  const w = el("div", { class: "window grow term-window", id: "win-term-" + n });
+  const open = document.querySelectorAll("#desktop .term-window").length;
+  w.style.left = (150 + open * 26) + "px";
+  w.style.top = (100 + open * 22) + "px";
+  w.style.width = "640px";
+  w.innerHTML = `<div class="titlebar"><button class="tbox close"></button><div class="stripe"></div>
+    <div class="title"></div>
+    <div class="stripe"></div><button class="tbox zoom"></button><button class="tbox shade"></button></div>
+    <div class="win-frame">
+      <div class="win-body" style="padding:8px"><div class="hostterm-box"></div></div>
+      <div class="statusbar"><span class="term-status">…</span></div>
+      ${GROW_TILE}
+    </div>`;
+  w.querySelector(".title").textContent = n === 1 ? "Terminal" : "Terminal " + n;
+  const box = w.querySelector(".hostterm-box"), status = w.querySelector(".term-status");
+  box.addEventListener("wheel", e => e.preventDefault(), { passive: false });
+  $("#desktop").append(w);
+  initWindow(w);
+  openWin(w);
+
+  const term = new Terminal({
+    fontSize: 12, cursorBlink: true,
+    fontFamily: '"Monaco", ui-monospace, SFMono-Regular, Menlo, monospace',
+    theme: { background: "#000000" },
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(box);
+  fit.fit();
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const tok = tokenInput.value ? "?token=" + encodeURIComponent(tokenInput.value) : "";
+  status.textContent = "connecting…";
+  const ws = new WebSocket(`${proto}://${location.host}/v1/host/terminal${tok}`);
+  ws.binaryType = "arraybuffer";
+  const enc = new TextEncoder();
+  const resize = () => {
+    if (ws.readyState === 1) {
+      fit.fit();
+      ws.send(JSON.stringify({ resize: [term.cols, term.rows] }));
+    }
+  };
+  ws.onopen = () => {
+    status.textContent = "connected";
+    ws.send(JSON.stringify({ resize: [term.cols, term.rows] }));
+    term.focus();
+  };
+  ws.onmessage = e => term.write(new Uint8Array(e.data));
+  ws.onclose = () => {
+    term.write("\r\n\x1b[90m[disconnected]\x1b[0m\r\n");
+    status.textContent = "disconnected — close and reopen for a new shell";
+  };
+  term.onData(d => { if (ws.readyState === 1) ws.send(enc.encode(d)); });
+  window.addEventListener("resize", resize);
+  wireGrow(w.querySelector(".grow-box"), w, box, 400, { minH: 160, onMove: resize });
+  w._teardown = () => {
+    window.removeEventListener("resize", resize);
+    ws.onclose = null;
+    try { ws.close(); } catch (e) {}
+    term.dispose();
+  };
+}
 
 // ---- web services ----
 $("#svc-refresh").onclick = () => loadPorts().catch(() => {});
